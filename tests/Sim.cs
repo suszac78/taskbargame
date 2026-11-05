@@ -20,6 +20,7 @@ static class Sim
     {
         string outDir = args.Length > 0 ? args[0] : ".";
         GameForm.SavePathOverride = Path.Combine(outDir, "save.txt");
+        Directory.CreateDirectory(outDir);
         if (File.Exists(GameForm.SavePathOverride)) File.Delete(GameForm.SavePathOverride);
         GameForm g = new GameForm(true);
         Steps(g, 5);

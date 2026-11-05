@@ -37,6 +37,7 @@ The sky follows your real clock (day, sunset, night). Progress saves automatical
 
 The game is C# 5 (`src/`), so the compiler that ships with Windows PowerShell 5.1 can build it.
 `python3 build.py` packs the source into `TaskbarTamer.bat`.
+Every push runs `.github/workflows/build.yml` on Windows. It builds `TaskbarTamer.exe`, checks the `.bat` compiles, and auto-plays the game. Download the results from the **Actions** tab.
 `tests/Sim.cs` renders screenshots and auto-plays the whole game under Mono:
 
 ```

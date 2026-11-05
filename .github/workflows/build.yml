@@ -1,0 +1,53 @@
+name: Build Taskbar Tamer
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the .bat compiles with Windows PowerShell 5.1 (same as on a real PC)
+        shell: powershell
+        run: |
+          $text = [IO.File]::ReadAllText("$PWD\TaskbarTamer.bat")
+          $a = $text.IndexOf("@'") + 4
+          $b = $text.IndexOf("`r`n'@")
+          $src = $text.Substring($a, $b - $a)
+          Add-Type -TypeDefinition $src -ReferencedAssemblies System.Windows.Forms, System.Drawing -IgnoreWarnings -ErrorAction Stop
+          Write-Host "Embedded game source compiled OK"
+
+      - name: Build TaskbarTamer.exe
+        shell: powershell
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          New-Item -ItemType Directory -Force out | Out-Null
+          & $csc /nologo /target:winexe /optimize+ /out:out\TaskbarTamer.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll src\Data.cs src\Game.cs src\Program.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item TaskbarTamer.bat, README.md out\
+
+      - name: Auto-play the whole game and take screenshots
+        shell: powershell
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          New-Item -ItemType Directory -Force shots | Out-Null
+          & $csc /nologo /out:sim.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll src\Data.cs src\Game.cs tests\Sim.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $p = Start-Process -FilePath .\sim.exe -ArgumentList "$PWD\shots" -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "Auto-play did not beat the Champion"; exit 1 }
+
+      - name: Upload the game
+        uses: actions/upload-artifact@v4
+        with:
+          name: TaskbarTamer
+          path: out/
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots/*.png
