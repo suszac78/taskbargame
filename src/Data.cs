@@ -30,19 +30,21 @@ namespace TaskbarTamer
         public int[] Team;       // pairs: species, level
         public string Intro, Lose;
         public bool Champion;
+        public int Gym = -1;     // badge index for gym leaders
     }
 
     public class ZoneDef
     {
-        public string Name; public int X0, X1, Kind;
+        public string Name, Region; public int X0, X1, Kind;
         public int[] Wild;       // pairs: species, weight
         public int MinLv, MaxLv;
     }
 
     public class BuildingDef
     {
-        public int X, Kind; // 0 heal, 1 shop, 2 home
+        public int X, Kind, Type; // kind: 0 heal, 1 shop, 2 home, 3 gym (Type = gym type)
         public BuildingDef(int x, int k) { X = x; Kind = k; }
+        public BuildingDef(int x, int k, int type) { X = x; Kind = k; Type = type; }
     }
 
     public static class Data
@@ -96,6 +98,8 @@ namespace TaskbarTamer
         static readonly int[] LearnBird = { 1, 2, 5, 20, 9, 3, 16, 4, 21, 15 };
         static readonly int[] LearnMite = { 1, 1, 3, 5, 8, 20, 12, 6, 18, 18, 23, 7 };
         static readonly int[] LearnFin = { 1, 0, 3, 8, 8, 14, 12, 9, 18, 15, 23, 10 };
+        static readonly int[] LearnStorm = { 1, 2, 4, 14, 9, 3, 15, 15, 21, 4, 25, 16 };
+        static readonly int[] LearnMoss = { 1, 1, 3, 11, 8, 20, 13, 12, 18, 18, 23, 13 };
 
         static SpeciesDef S(string name, int type, int hp, int atk, int def, int spd, int evoTo, int evoLv,
                             int[] learn, int sprite, bool big, int cr, int c1, int c2, int c3)
@@ -124,6 +128,10 @@ namespace TaskbarTamer
             S("Magmantis",  FIRE,  68, 92, 60, 82,  -1,  0, LearnMite,  13, true,  25, 0x505058, 0x28282C, 0xFF6020), // 13
             S("Glimfin",    WATER, 40, 45, 42, 68,  15, 15, LearnFin,   14, false, 50, 0x60D0D0, 0x3090A0, 0xFFF080), // 14
             S("Lumiray",    WATER, 72, 72, 72, 88,  -1,  0, LearnFin,   15, true,  25, 0x9070E0, 0x5840A0, 0x80FFE0), // 15
+            S("Stormowl",   VOLT,  42, 50, 38, 66,  17, 16, LearnStorm, 10, false, 50, 0x8090A8, 0x505C78, 0xFFE040), // 16
+            S("Tempestowl", VOLT,  70, 84, 60, 96,  -1,  0, LearnStorm, 11, true,  25, 0x404C70, 0x262E48, 0xFFD020), // 17
+            S("Mossmite",   LEAF,  44, 50, 46, 52,  19, 15, LearnMoss,  12, false, 50, 0x78C050, 0x3E8030, 0xF0E060), // 18
+            S("Verdantis",  LEAF,  74, 86, 70, 76,  -1,  0, LearnMoss,  13, true,  25, 0x3E7A48, 0x24502C, 0xA0F060), // 19
         };
 
         public static readonly int[] Starters = { 0, 2, 4 };
@@ -578,48 +586,86 @@ namespace TaskbarTamer
             new int[] { 0x2E7D32, 0x80B060, 0x404830, 0xC08040, 0x806040 },
             new int[] { 0x7030A0, 0x303048, 0x581C80, 0xE8E8F0, 0x7030A0 },
             new int[] { 0xE8E8E8, 0xF4F4F4, 0x606070, 0x909098, 0x909098 },
+            new int[] { 0x7A6A58, 0xA08A60, 0x4A4038, 0x2A2420, 0x6A5A48 }, // 6 Slate (rock)
+            new int[] { 0x2F7FD8, 0x58B0F0, 0x1E3C70, 0x2A6AA8, 0xF0F0F8 }, // 7 Marina (water)
+            new int[] { 0x3A9A48, 0x9AD070, 0x3A5030, 0xD89048, 0x6A8A38 }, // 8 Fern (leaf)
+            new int[] { 0xD83828, 0xF08030, 0x402020, 0xE85020, 0x302828 }, // 9 Blaze (fire)
+            new int[] { 0xE8C020, 0x303848, 0x202838, 0xF8E890, 0xE8C020 }, // 10 Volta (volt)
+            new int[] { 0x30B8D0, 0xF06878, 0x2850A0, 0x5A3418, 0xF8D040 }, // 11 swimmer
+            new int[] { 0xF0A020, 0x5A6A80, 0x303848, 0x403028, 0x808890 }, // 12 engineer
         };
+
+        // Five regions in a row along the taskbar. Each ends in a town with a gym.
+        public static readonly string[] BadgeNames = { "Pebble", "Wave", "Sprout", "Flame", "Spark" };
+        public static readonly int[] BadgeTypes = { ROCK, WATER, LEAF, FIRE, VOLT };
 
         public static readonly ZoneDef[] Zones = {
-            Z("Pixelvale",    0,    300, 0, new int[0], 1, 1),
-            Z("Breezy Path",  300,  770, 1, new int[] { 10, 40, 8, 35, 6, 15, 12, 10 }, 2, 5),
-            Z("Misty Shore",  770,  1300, 2, new int[] { 14, 40, 2, 12, 10, 20, 6, 28 }, 5, 9),
-            Z("Glowwood",     1300, 1870, 3, new int[] { 4, 25, 12, 25, 6, 20, 10, 20, 0, 10 }, 9, 13),
-            Z("Ember Cave",   1870, 2460, 4, new int[] { 8, 30, 0, 20, 12, 20, 14, 15, 6, 15 }, 13, 17),
+            Z("Pixelvale",     "Meadowmark", 0,    300,  0, new int[0], 1, 1),
+            Z("Breezy Path",   "Meadowmark", 300,  800,  1, new int[] { 10, 40, 8, 35, 6, 15, 12, 10 }, 2, 5),
+            Z("Cobbleton",     "Meadowmark", 800,  1040, 0, new int[0], 1, 1),
+            Z("Misty Shore",   "Tidewater",  1040, 1580, 2, new int[] { 14, 40, 2, 12, 10, 20, 6, 28 }, 5, 9),
+            Z("Port Ripple",   "Tidewater",  1580, 1820, 2, new int[0], 1, 1),
+            Z("Glowwood",      "Verdant",    1820, 2390, 3, new int[] { 4, 25, 18, 25, 6, 20, 10, 20, 0, 10 }, 9, 13),
+            Z("Mossbrook",     "Verdant",    2390, 2630, 3, new int[0], 1, 1),
+            Z("Ember Cave",    "Cinder",     2630, 3220, 4, new int[] { 8, 30, 0, 20, 12, 20, 14, 15, 6, 15 }, 13, 17),
+            Z("Kilnburg",      "Cinder",     3220, 3460, 4, new int[0], 1, 1),
+            Z("Thunder Ridge", "Stormcrest", 3460, 4030, 5, new int[] { 16, 30, 6, 30, 8, 20, 10, 20 }, 17, 21),
+            Z("Boltgate",      "Stormcrest", 4030, 4270, 5, new int[0], 1, 1),
+            Z("Victory Road",  "Stormcrest", 4270, 4700, 4, new int[] { 8, 25, 10, 25, 12, 20, 14, 15, 16, 15 }, 22, 26),
         };
-        public const int WorldW = 2460;
+        public const int WorldW = 4700;
 
-        static ZoneDef Z(string n, int x0, int x1, int kind, int[] wild, int a, int b)
+        static ZoneDef Z(string n, string region, int x0, int x1, int kind, int[] wild, int a, int b)
         {
-            ZoneDef z = new ZoneDef(); z.Name = n; z.X0 = x0; z.X1 = x1; z.Kind = kind; z.Wild = wild; z.MinLv = a; z.MaxLv = b;
+            ZoneDef z = new ZoneDef(); z.Name = n; z.Region = region; z.X0 = x0; z.X1 = x1; z.Kind = kind; z.Wild = wild; z.MinLv = a; z.MaxLv = b;
             return z;
         }
 
         public static readonly int[] Grass = {
             330, 420, 480, 600, 640, 735,
-            810, 930, 990, 1120, 1170, 1245,
-            1420, 1560, 1610, 1800,
-            1950, 2120, 2170, 2340 };
+            1080, 1200, 1260, 1380, 1430, 1510,
+            1870, 2010, 2060, 2200, 2240, 2320,
+            2680, 2840, 2890, 3030, 3070, 3150,
+            3510, 3650, 3700, 3840, 3880, 3960,
+            4310, 4440, 4490, 4600 };
 
         public static readonly BuildingDef[] Buildings = {
             new BuildingDef(40, 2), new BuildingDef(110, 0), new BuildingDef(200, 1),
-            new BuildingDef(1325, 0), new BuildingDef(1380, 1), new BuildingDef(1905, 0),
+            new BuildingDef(850, 0), new BuildingDef(910, 1), new BuildingDef(990, 3, ROCK),
+            new BuildingDef(1630, 0), new BuildingDef(1690, 1), new BuildingDef(1770, 3, WATER),
+            new BuildingDef(2440, 0), new BuildingDef(2500, 1), new BuildingDef(2580, 3, LEAF),
+            new BuildingDef(3270, 0), new BuildingDef(3330, 1), new BuildingDef(3410, 3, FIRE),
+            new BuildingDef(4080, 0), new BuildingDef(4140, 1), new BuildingDef(4220, 3, VOLT),
         };
 
         public static readonly TrainerDef[] Trainers = {
-            T("Bug Kid Tam", 750, 1, new int[] { 12, 5, 10, 6 },
+            T("Bug Kid Tam", 770, 1, -1, new int[] { 12, 4, 10, 5 },
               "Hey! My critters have been itching for a fight!", "Aww, my bugs got squished..."),
-            T("Hiker Brom", 1270, 2, new int[] { 8, 9, 6, 9, 8, 10 },
+            T("Leader Slate", 990, 6, 0, new int[] { 10, 7, 8, 9 },
+              "Welcome to Cobbleton Gym! My rock critters don't budge. Can you move them?", "Solid work. Take the Pebble Badge, you earned it."),
+            T("Swimmer Rae", 1550, 11, -1, new int[] { 14, 9, 2, 10 },
+              "The tide's coming in, and so am I!", "Washed out... the gym's just ahead."),
+            T("Leader Marina", 1770, 7, 1, new int[] { 14, 11, 2, 12, 14, 13 },
+              "Port Ripple Gym! Let's see if you can ride the waves.", "What a splash! The Wave Badge is yours."),
+            T("Ranger Ivy", 2360, 3, -1, new int[] { 4, 12, 18, 13, 6, 13 },
+              "Glowwood is my patrol. Show me you respect the forest!", "You're ready for Mossbrook Gym."),
+            T("Leader Fern", 2580, 8, 2, new int[] { 18, 14, 4, 16, 18, 16 },
+              "Mossbrook Gym grows strong roots. Try to pull them up!", "You blossomed! Here's the Sprout Badge."),
+            T("Hiker Brom", 3190, 2, -1, new int[] { 8, 16, 8, 17, 12, 17 },
               "These rocks are tougher than they look!", "Crumbled like gravel. Nice work!"),
-            T("Ranger Ivy", 1850, 3, new int[] { 4, 13, 14, 13, 6, 14 },
-              "The cave ahead is dangerous. Prove you're ready!", "You're ready. Mind the heat in there."),
-            T("Champion Vex", 2420, 4, new int[] { 13, 18, 15, 18, 5, 19, 7, 20 },
-              "So you made it to the end of the taskbar. Let's see what you've got!", "Incredible... you are the new Taskbar Champion!"),
+            T("Leader Blaze", 3410, 9, 3, new int[] { 12, 18, 0, 19, 13, 20 },
+              "Kilnburg Gym burns hot! Hope you brought water.", "I'm burnt out. The Flame Badge, it's yours!"),
+            T("Engineer Watt", 4000, 12, -1, new int[] { 6, 20, 16, 21, 7, 22 },
+              "I wired these critters myself. Prepare for a shock!", "Short circuit! Boltgate's just past here."),
+            T("Leader Volta", 4220, 10, 4, new int[] { 16, 22, 7, 23, 17, 24 },
+              "Boltgate Gym, the last gym! Thunder doesn't wait!", "Electrifying! The Spark Badge. Go face the Champion."),
+            T("Champion Vex", 4660, 4, -1, new int[] { 11, 26, 13, 27, 15, 27, 5, 28, 7, 29 },
+              "Five badges, all the way to the end of the taskbar. Let's see what you've got!", "Incredible... you are the new Taskbar Champion!"),
         };
 
-        static TrainerDef T(string n, int x, int look, int[] team, string intro, string lose)
+        static TrainerDef T(string n, int x, int look, int gym, int[] team, string intro, string lose)
         {
-            TrainerDef t = new TrainerDef(); t.Name = n; t.X = x; t.Look = look; t.Team = team; t.Intro = intro; t.Lose = lose;
+            TrainerDef t = new TrainerDef(); t.Name = n; t.X = x; t.Look = look; t.Gym = gym; t.Team = team; t.Intro = intro; t.Lose = lose;
             t.Champion = look == 4;
             return t;
         }

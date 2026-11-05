@@ -25,10 +25,22 @@ There's nothing to install. It uses PowerShell, which comes with Windows, and th
 
 ## The game
 
-Pick one of three partners: Emberpup (fire), Driplet (water) or Sproutle (leaf).
-Walk east through Breezy Path, Misty Shore, Glowwood and Ember Cave. Catch critters in the tall grass with Orbs,
-beat three trainers, then take on Champion Vex. Fire beats Leaf, Leaf beats Water, Water beats Fire,
-Volt zaps Water, and Rock crushes Fire and Volt. Critters evolve at around level 14-16.
+Pick one of three partners: Emberpup (fire), Driplet (water) or Sproutle (leaf), then head east through five regions.
+Each region ends in a town with a Rest Hut, a Shop and a Gym. Beat the gym leader to earn their badge:
+
+| Region | Route | Town | Gym leader | Badge |
+| --- | --- | --- | --- | --- |
+| Meadowmark | Breezy Path | Cobbleton | Slate (rock) | Pebble |
+| Tidewater | Misty Shore | Port Ripple | Marina (water) | Wave |
+| Verdant | Glowwood | Mossbrook | Fern (leaf) | Sprout |
+| Cinder | Ember Cave | Kilnburg | Blaze (fire) | Flame |
+| Stormcrest | Thunder Ridge | Boltgate | Volta (volt) | Spark |
+
+With all five badges, walk Victory Road and take on Champion Vex. Catch critters in the tall grass with Orbs.
+Fire beats Leaf, Leaf beats Water, Water beats Fire, Volt zaps Water, and Rock crushes Fire and Volt.
+Critters evolve at around level 14-16. Badges show at the top of the strip.
+
+Saves from the older, shorter version keep your team and items but start the journey again from Pixelvale.
 
 The sky follows your real clock (day, sunset, night). Progress saves automatically to
 `%APPDATA%\TaskbarTamer\save.txt`.

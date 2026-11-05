@@ -45,19 +45,21 @@ namespace TaskbarTamer
         public int[] Team;       // pairs: species, level
         public string Intro, Lose;
         public bool Champion;
+        public int Gym = -1;     // badge index for gym leaders
     }
 
     public class ZoneDef
     {
-        public string Name; public int X0, X1, Kind;
+        public string Name, Region; public int X0, X1, Kind;
         public int[] Wild;       // pairs: species, weight
         public int MinLv, MaxLv;
     }
 
     public class BuildingDef
     {
-        public int X, Kind; // 0 heal, 1 shop, 2 home
+        public int X, Kind, Type; // kind: 0 heal, 1 shop, 2 home, 3 gym (Type = gym type)
         public BuildingDef(int x, int k) { X = x; Kind = k; }
+        public BuildingDef(int x, int k, int type) { X = x; Kind = k; Type = type; }
     }
 
     public static class Data
@@ -111,6 +113,8 @@ namespace TaskbarTamer
         static readonly int[] LearnBird = { 1, 2, 5, 20, 9, 3, 16, 4, 21, 15 };
         static readonly int[] LearnMite = { 1, 1, 3, 5, 8, 20, 12, 6, 18, 18, 23, 7 };
         static readonly int[] LearnFin = { 1, 0, 3, 8, 8, 14, 12, 9, 18, 15, 23, 10 };
+        static readonly int[] LearnStorm = { 1, 2, 4, 14, 9, 3, 15, 15, 21, 4, 25, 16 };
+        static readonly int[] LearnMoss = { 1, 1, 3, 11, 8, 20, 13, 12, 18, 18, 23, 13 };
 
         static SpeciesDef S(string name, int type, int hp, int atk, int def, int spd, int evoTo, int evoLv,
                             int[] learn, int sprite, bool big, int cr, int c1, int c2, int c3)
@@ -139,6 +143,10 @@ namespace TaskbarTamer
             S("Magmantis",  FIRE,  68, 92, 60, 82,  -1,  0, LearnMite,  13, true,  25, 0x505058, 0x28282C, 0xFF6020), // 13
             S("Glimfin",    WATER, 40, 45, 42, 68,  15, 15, LearnFin,   14, false, 50, 0x60D0D0, 0x3090A0, 0xFFF080), // 14
             S("Lumiray",    WATER, 72, 72, 72, 88,  -1,  0, LearnFin,   15, true,  25, 0x9070E0, 0x5840A0, 0x80FFE0), // 15
+            S("Stormowl",   VOLT,  42, 50, 38, 66,  17, 16, LearnStorm, 10, false, 50, 0x8090A8, 0x505C78, 0xFFE040), // 16
+            S("Tempestowl", VOLT,  70, 84, 60, 96,  -1,  0, LearnStorm, 11, true,  25, 0x404C70, 0x262E48, 0xFFD020), // 17
+            S("Mossmite",   LEAF,  44, 50, 46, 52,  19, 15, LearnMoss,  12, false, 50, 0x78C050, 0x3E8030, 0xF0E060), // 18
+            S("Verdantis",  LEAF,  74, 86, 70, 76,  -1,  0, LearnMoss,  13, true,  25, 0x3E7A48, 0x24502C, 0xA0F060), // 19
         };
 
         public static readonly int[] Starters = { 0, 2, 4 };
@@ -593,48 +601,86 @@ namespace TaskbarTamer
             new int[] { 0x2E7D32, 0x80B060, 0x404830, 0xC08040, 0x806040 },
             new int[] { 0x7030A0, 0x303048, 0x581C80, 0xE8E8F0, 0x7030A0 },
             new int[] { 0xE8E8E8, 0xF4F4F4, 0x606070, 0x909098, 0x909098 },
+            new int[] { 0x7A6A58, 0xA08A60, 0x4A4038, 0x2A2420, 0x6A5A48 }, // 6 Slate (rock)
+            new int[] { 0x2F7FD8, 0x58B0F0, 0x1E3C70, 0x2A6AA8, 0xF0F0F8 }, // 7 Marina (water)
+            new int[] { 0x3A9A48, 0x9AD070, 0x3A5030, 0xD89048, 0x6A8A38 }, // 8 Fern (leaf)
+            new int[] { 0xD83828, 0xF08030, 0x402020, 0xE85020, 0x302828 }, // 9 Blaze (fire)
+            new int[] { 0xE8C020, 0x303848, 0x202838, 0xF8E890, 0xE8C020 }, // 10 Volta (volt)
+            new int[] { 0x30B8D0, 0xF06878, 0x2850A0, 0x5A3418, 0xF8D040 }, // 11 swimmer
+            new int[] { 0xF0A020, 0x5A6A80, 0x303848, 0x403028, 0x808890 }, // 12 engineer
         };
+
+        // Five regions in a row along the taskbar. Each ends in a town with a gym.
+        public static readonly string[] BadgeNames = { "Pebble", "Wave", "Sprout", "Flame", "Spark" };
+        public static readonly int[] BadgeTypes = { ROCK, WATER, LEAF, FIRE, VOLT };
 
         public static readonly ZoneDef[] Zones = {
-            Z("Pixelvale",    0,    300, 0, new int[0], 1, 1),
-            Z("Breezy Path",  300,  770, 1, new int[] { 10, 40, 8, 35, 6, 15, 12, 10 }, 2, 5),
-            Z("Misty Shore",  770,  1300, 2, new int[] { 14, 40, 2, 12, 10, 20, 6, 28 }, 5, 9),
-            Z("Glowwood",     1300, 1870, 3, new int[] { 4, 25, 12, 25, 6, 20, 10, 20, 0, 10 }, 9, 13),
-            Z("Ember Cave",   1870, 2460, 4, new int[] { 8, 30, 0, 20, 12, 20, 14, 15, 6, 15 }, 13, 17),
+            Z("Pixelvale",     "Meadowmark", 0,    300,  0, new int[0], 1, 1),
+            Z("Breezy Path",   "Meadowmark", 300,  800,  1, new int[] { 10, 40, 8, 35, 6, 15, 12, 10 }, 2, 5),
+            Z("Cobbleton",     "Meadowmark", 800,  1040, 0, new int[0], 1, 1),
+            Z("Misty Shore",   "Tidewater",  1040, 1580, 2, new int[] { 14, 40, 2, 12, 10, 20, 6, 28 }, 5, 9),
+            Z("Port Ripple",   "Tidewater",  1580, 1820, 2, new int[0], 1, 1),
+            Z("Glowwood",      "Verdant",    1820, 2390, 3, new int[] { 4, 25, 18, 25, 6, 20, 10, 20, 0, 10 }, 9, 13),
+            Z("Mossbrook",     "Verdant",    2390, 2630, 3, new int[0], 1, 1),
+            Z("Ember Cave",    "Cinder",     2630, 3220, 4, new int[] { 8, 30, 0, 20, 12, 20, 14, 15, 6, 15 }, 13, 17),
+            Z("Kilnburg",      "Cinder",     3220, 3460, 4, new int[0], 1, 1),
+            Z("Thunder Ridge", "Stormcrest", 3460, 4030, 5, new int[] { 16, 30, 6, 30, 8, 20, 10, 20 }, 17, 21),
+            Z("Boltgate",      "Stormcrest", 4030, 4270, 5, new int[0], 1, 1),
+            Z("Victory Road",  "Stormcrest", 4270, 4700, 4, new int[] { 8, 25, 10, 25, 12, 20, 14, 15, 16, 15 }, 22, 26),
         };
-        public const int WorldW = 2460;
+        public const int WorldW = 4700;
 
-        static ZoneDef Z(string n, int x0, int x1, int kind, int[] wild, int a, int b)
+        static ZoneDef Z(string n, string region, int x0, int x1, int kind, int[] wild, int a, int b)
         {
-            ZoneDef z = new ZoneDef(); z.Name = n; z.X0 = x0; z.X1 = x1; z.Kind = kind; z.Wild = wild; z.MinLv = a; z.MaxLv = b;
+            ZoneDef z = new ZoneDef(); z.Name = n; z.Region = region; z.X0 = x0; z.X1 = x1; z.Kind = kind; z.Wild = wild; z.MinLv = a; z.MaxLv = b;
             return z;
         }
 
         public static readonly int[] Grass = {
             330, 420, 480, 600, 640, 735,
-            810, 930, 990, 1120, 1170, 1245,
-            1420, 1560, 1610, 1800,
-            1950, 2120, 2170, 2340 };
+            1080, 1200, 1260, 1380, 1430, 1510,
+            1870, 2010, 2060, 2200, 2240, 2320,
+            2680, 2840, 2890, 3030, 3070, 3150,
+            3510, 3650, 3700, 3840, 3880, 3960,
+            4310, 4440, 4490, 4600 };
 
         public static readonly BuildingDef[] Buildings = {
             new BuildingDef(40, 2), new BuildingDef(110, 0), new BuildingDef(200, 1),
-            new BuildingDef(1325, 0), new BuildingDef(1380, 1), new BuildingDef(1905, 0),
+            new BuildingDef(850, 0), new BuildingDef(910, 1), new BuildingDef(990, 3, ROCK),
+            new BuildingDef(1630, 0), new BuildingDef(1690, 1), new BuildingDef(1770, 3, WATER),
+            new BuildingDef(2440, 0), new BuildingDef(2500, 1), new BuildingDef(2580, 3, LEAF),
+            new BuildingDef(3270, 0), new BuildingDef(3330, 1), new BuildingDef(3410, 3, FIRE),
+            new BuildingDef(4080, 0), new BuildingDef(4140, 1), new BuildingDef(4220, 3, VOLT),
         };
 
         public static readonly TrainerDef[] Trainers = {
-            T("Bug Kid Tam", 750, 1, new int[] { 12, 5, 10, 6 },
+            T("Bug Kid Tam", 770, 1, -1, new int[] { 12, 4, 10, 5 },
               "Hey! My critters have been itching for a fight!", "Aww, my bugs got squished..."),
-            T("Hiker Brom", 1270, 2, new int[] { 8, 9, 6, 9, 8, 10 },
+            T("Leader Slate", 990, 6, 0, new int[] { 10, 7, 8, 9 },
+              "Welcome to Cobbleton Gym! My rock critters don't budge. Can you move them?", "Solid work. Take the Pebble Badge, you earned it."),
+            T("Swimmer Rae", 1550, 11, -1, new int[] { 14, 9, 2, 10 },
+              "The tide's coming in, and so am I!", "Washed out... the gym's just ahead."),
+            T("Leader Marina", 1770, 7, 1, new int[] { 14, 11, 2, 12, 14, 13 },
+              "Port Ripple Gym! Let's see if you can ride the waves.", "What a splash! The Wave Badge is yours."),
+            T("Ranger Ivy", 2360, 3, -1, new int[] { 4, 12, 18, 13, 6, 13 },
+              "Glowwood is my patrol. Show me you respect the forest!", "You're ready for Mossbrook Gym."),
+            T("Leader Fern", 2580, 8, 2, new int[] { 18, 14, 4, 16, 18, 16 },
+              "Mossbrook Gym grows strong roots. Try to pull them up!", "You blossomed! Here's the Sprout Badge."),
+            T("Hiker Brom", 3190, 2, -1, new int[] { 8, 16, 8, 17, 12, 17 },
               "These rocks are tougher than they look!", "Crumbled like gravel. Nice work!"),
-            T("Ranger Ivy", 1850, 3, new int[] { 4, 13, 14, 13, 6, 14 },
-              "The cave ahead is dangerous. Prove you're ready!", "You're ready. Mind the heat in there."),
-            T("Champion Vex", 2420, 4, new int[] { 13, 18, 15, 18, 5, 19, 7, 20 },
-              "So you made it to the end of the taskbar. Let's see what you've got!", "Incredible... you are the new Taskbar Champion!"),
+            T("Leader Blaze", 3410, 9, 3, new int[] { 12, 18, 0, 19, 13, 20 },
+              "Kilnburg Gym burns hot! Hope you brought water.", "I'm burnt out. The Flame Badge, it's yours!"),
+            T("Engineer Watt", 4000, 12, -1, new int[] { 6, 20, 16, 21, 7, 22 },
+              "I wired these critters myself. Prepare for a shock!", "Short circuit! Boltgate's just past here."),
+            T("Leader Volta", 4220, 10, 4, new int[] { 16, 22, 7, 23, 17, 24 },
+              "Boltgate Gym, the last gym! Thunder doesn't wait!", "Electrifying! The Spark Badge. Go face the Champion."),
+            T("Champion Vex", 4660, 4, -1, new int[] { 11, 26, 13, 27, 15, 27, 5, 28, 7, 29 },
+              "Five badges, all the way to the end of the taskbar. Let's see what you've got!", "Incredible... you are the new Taskbar Champion!"),
         };
 
-        static TrainerDef T(string n, int x, int look, int[] team, string intro, string lose)
+        static TrainerDef T(string n, int x, int look, int gym, int[] team, string intro, string lose)
         {
-            TrainerDef t = new TrainerDef(); t.Name = n; t.X = x; t.Look = look; t.Team = team; t.Intro = intro; t.Lose = lose;
+            TrainerDef t = new TrainerDef(); t.Name = n; t.X = x; t.Look = look; t.Gym = gym; t.Team = team; t.Intro = intro; t.Lose = lose;
             t.Champion = look == 4;
             return t;
         }
@@ -977,7 +1023,7 @@ namespace TaskbarTamer
             try
             {
                 List<string> l = new List<string>();
-                l.Add("v=1");
+                l.Add("v=2");
                 l.Add("x=" + (int)px);
                 l.Add("coins=" + coins); l.Add("orbs=" + orbs); l.Add("potions=" + potions);
                 l.Add("beaten=" + beaten); l.Add("champ=" + champWins); l.Add("healx=" + (int)healX);
@@ -997,6 +1043,7 @@ namespace TaskbarTamer
             try
             {
                 if (!File.Exists(SavePath)) return;
+                int ver = 1;
                 foreach (string line in File.ReadAllLines(SavePath))
                 {
                     int eq = line.IndexOf('=');
@@ -1004,6 +1051,7 @@ namespace TaskbarTamer
                     string k = line.Substring(0, eq), v = line.Substring(eq + 1);
                     switch (k)
                     {
+                        case "v": ver = int.Parse(v); break;
                         case "x": px = int.Parse(v); break;
                         case "coins": coins = int.Parse(v); break;
                         case "orbs": orbs = int.Parse(v); break;
@@ -1018,6 +1066,7 @@ namespace TaskbarTamer
                         case "box": box.Add(Mon.Parse(v)); break;
                     }
                 }
+                if (ver < 2) { px = 150; beaten = 0; healX = 110; } // the world got bigger: keep the team, restart the journey
                 px = Math.Max(6, Math.Min(Data.WorldW - 6, px));
                 if (!AnyAlive()) HealAll();
             }
@@ -1142,11 +1191,24 @@ namespace TaskbarTamer
             Say("You chose " + m.Name + "! Take good care of it.");
             Say("Here are 5 Orbs for catching critters and 2 Potions.");
             Say("Walk with the arrow keys (or click). Z talks, Tab shows your team.");
-            Say("Beat the trainers to the east, then the Champion. Good luck!");
+            Say("Head east through 5 regions. Win a badge at each town's gym, then face the Champion!");
             Do(Save);
         }
 
         bool Beaten(int i) { return (beaten & (1 << i)) != 0; }
+
+        int BadgeCount()
+        {
+            int n = 0;
+            for (int i = 0; i < Data.Trainers.Length; i++) if (Data.Trainers[i].Gym >= 0 && Beaten(i)) n++;
+            return n;
+        }
+
+        bool HasBadge(int b)
+        {
+            for (int i = 0; i < Data.Trainers.Length; i++) if (Data.Trainers[i].Gym == b) return Beaten(i);
+            return false;
+        }
         bool AnyAlive() { foreach (Mon m in party) if (m.Hp > 0) return true; return false; }
         void HealAll() { foreach (Mon m in party) { m.Hp = m.MaxHp; m.DispHp = m.Hp; } }
 
@@ -1230,6 +1292,12 @@ namespace TaskbarTamer
                 Do(Save);
             }
             else if (bd.Kind == 1) { mode = M_SHOP; cursor = 0; }
+            else if (bd.Kind == 3)
+            {
+                int bi = Array.IndexOf(Data.BadgeTypes, bd.Type);
+                Say(Data.TypeNames[bd.Type].Substring(0, 1) + Data.TypeNames[bd.Type].Substring(1).ToLower() + " Gym. You hold the " + Data.BadgeNames[bi] + " Badge here.");
+                Say("Badges: " + BadgeCount() + " of " + Data.BadgeNames.Length + ".");
+            }
             else
             {
                 string[] notes = {
@@ -1406,6 +1474,12 @@ namespace TaskbarTamer
                 Say("You beat " + tr.Name + "!");
                 Say(tr.Name + ": \"" + tr.Lose + "\"");
                 Say("You got " + prize + " coins for winning!");
+                if (tr.Gym >= 0)
+                {
+                    potions += 2; orbs += 3;
+                    Say("You earned the " + Data.BadgeNames[tr.Gym] + " Badge! (" + BadgeCount() + "/" + Data.BadgeNames.Length + ")");
+                    Say("The leader also gave you 3 Orbs and 2 Potions.");
+                }
                 if (firstChamp)
                 {
                     Say("You conquered the whole taskbar! Amazing!");
@@ -1888,6 +1962,15 @@ namespace TaskbarTamer
             return b;
         }
 
+        // positive f darkens, negative lightens
+        static int Shade(int c, float f)
+        {
+            int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+            if (f >= 0) { r = (int)(r * (1 - f)); g = (int)(g * (1 - f)); b = (int)(b * (1 - f)); }
+            else { r += (int)((255 - r) * -f); g += (int)((255 - g) * -f); b += (int)((255 - b) * -f); }
+            return (r << 16) | (g << 8) | b;
+        }
+
         static Color Mix(int a, int b, float f)
         {
             Color ca = Data.C(a), cb = Data.C(b);
@@ -2140,6 +2223,7 @@ namespace TaskbarTamer
 
             // night tint
             if (TimeOfDay() == 2 && kind != 4) R(0, 0, VW, VH, 0x101040, 60);
+            if (kind == 5 && Mod(t, 7) < 0.12f) R(0, 0, VW, VH, 0xFFFFFF, 70); // lightning
 
             // building signs (smooth layer)
             foreach (BuildingDef b in Data.Buildings)
@@ -2148,6 +2232,11 @@ namespace TaskbarTamer
                 if (x < -40 || x > VW + 40) continue;
                 if (b.Kind == 0) { URect(x - 10, 15.5f, 20, 7, 0xFFFFFF, 2, 255, 0xE04848); Txt("REST", x, 16.3f, 4.6f, 0xD03030, 1); }
                 else if (b.Kind == 1) { URect(x - 10, 20.5f, 20, 6.5f, 0x2F5FC0, 2); Txt("SHOP", x, 21.2f, 4.6f, 0xFFFFFF, 1); }
+                else if (b.Kind == 3)
+                {
+                    URect(x - 11, 15.5f, 22, 7.5f, 0xFFFFFF, 2, 255, Data.TypeColors[b.Type]);
+                    Txt("GYM", x, 16.4f, 4.8f, Shade(Data.TypeColors[b.Type], 0.35f), 1);
+                }
             }
 
             // interact hint
@@ -2176,6 +2265,7 @@ namespace TaskbarTamer
             else if (tod == 2) sky = new int[] { 0x0C1430, 0x142040, 0x1C2C50, 0x283C64 };
             else if (tod == 1) sky = new int[] { 0x4A3C80, 0xA05878, 0xE08860, 0xF8C070 };
             else if (kind == 3) sky = new int[] { 0x5898C8, 0x70B0D0, 0x88C8D0, 0xA0D8C8 };
+            else if (kind == 5) sky = new int[] { 0x3A4058, 0x4A5270, 0x5A6488, 0x6E78A0 };
             else sky = new int[] { 0x68A8E8, 0x80C0F0, 0x98D0F8, 0xB0E0F8 };
             for (int b = 0; b < 4; b++) R(0, b * 11, VW, 11, sky[b]);
 
@@ -2269,12 +2359,38 @@ namespace TaskbarTamer
                     R(0, groundY, VW, VH - groundY, 0x5A4A42);
                     R(0, groundY, VW, 1, 0x7A6050);
                     break;
+                case 5:
+                    for (int i = 0; i < 8; i++)
+                    {
+                        float mx = Mod(i * 90 - cam * 0.25f, VW + 180) - 90;
+                        int mh = 22 + Hash(i * 11) % 14;
+                        Tri(mx, groundY, mx + 45, groundY - mh, mx + 90, groundY, tod == 2 ? 0x2A3048 : 0x5A6078);
+                        Tri(mx + 36, groundY - mh + 7, mx + 45, groundY - mh, mx + 54, groundY - mh + 7, 0xE8ECF4);
+                    }
+                    for (int i = 0; i < 12; i++)
+                    {
+                        float hx = Mod(i * 55 + 10 - cam * 0.6f, VW + 110) - 55;
+                        lg.FillEllipse(Br(tod == 2 ? 0x283040 : 0x6A7088), hx, groundY - 5, 38, 10);
+                    }
+                    if (Mod(t, 7) < 0.25f)
+                    {
+                        float lx = Mod(Hash((int)(t / 7)) % 400 - cam * 0.25f, VW);
+                        R(lx, 6, 1, 6, 0xFFF8A0); R(lx + 1, 11, 1, 6, 0xFFF8A0); R(lx, 16, 1, 7, 0xFFF8A0);
+                    }
+                    for (int i = 0; i < 8; i++)
+                    {
+                        float cx = Mod(i * 83 - cam * 0.1f + t * 5, VW + 60) - 30;
+                        R(cx, 2 + (i * 5) % 9, 22, 4, 0x2E3448, 200); R(cx + 4, 0 + (i * 5) % 9, 12, 2, 0x2E3448, 200);
+                    }
+                    R(0, groundY, VW, VH - groundY, 0x7A8070);
+                    R(0, groundY, VW, 1, 0x9AA088);
+                    break;
             }
 
             if (!battle)
             {
-                int pathA = kind == 2 ? 0xD8C088 : kind == 3 ? 0x9A7A50 : kind == 4 ? 0x403430 : 0xD8C090;
-                int pathB = kind == 2 ? 0xC8B078 : kind == 3 ? 0x7A5A38 : kind == 4 ? 0x302420 : 0xB8A070;
+                int pathA = kind == 2 ? 0xD8C088 : kind == 3 ? 0x9A7A50 : kind == 4 ? 0x403430 : kind == 5 ? 0x9A9488 : 0xD8C090;
+                int pathB = kind == 2 ? 0xC8B078 : kind == 3 ? 0x7A5A38 : kind == 4 ? 0x302420 : kind == 5 ? 0x7A7468 : 0xB8A070;
                 R(0, 52, VW, 7, pathA);
                 R(0, 52, VW, 1, pathB); R(0, 58, VW, 1, pathB);
                 int first = (int)(cam / 13);
@@ -2285,7 +2401,7 @@ namespace TaskbarTamer
                     if (kind <= 1 && hy < 3) { R(dx, 47 + hy, 1, 1, Hash(i) % 2 == 0 ? 0xF8F070 : 0xF890B0); }
                     else if (kind == 2 && hy < 2) R(dx, 47 + hy, 2, 1, 0xC8A878);
                     else if (kind == 4 && hy < 2) R(dx, 61, 2, 1, 0x6A5A50);
-                    R(dx + 5, 60 + hy % 3, 1, 1, kind == 4 ? 0x4A3A34 : 0x5AA840);
+                    R(dx + 5, 60 + hy % 3, 1, 1, kind == 4 ? 0x4A3A34 : kind == 5 ? 0x5A6050 : 0x5AA840);
                 }
             }
         }
@@ -2297,8 +2413,8 @@ namespace TaskbarTamer
                 float sx0 = Data.Grass[g] - cam, sx1 = Data.Grass[g + 1] - cam;
                 if (sx1 < 0 || sx0 > VW) continue;
                 int kind = Data.ZoneAt(Data.Grass[g]).Kind;
-                int dark = kind == 4 ? 0x7A3A2A : kind == 3 ? 0x1E6A2E : kind == 2 ? 0x4A9840 : 0x2E8A30;
-                int light = kind == 4 ? 0xB0583A : kind == 3 ? 0x2E8A3E : kind == 2 ? 0x68B858 : 0x48B048;
+                int dark = kind == 4 ? 0x7A3A2A : kind == 5 ? 0x4A6A48 : kind == 3 ? 0x1E6A2E : kind == 2 ? 0x4A9840 : 0x2E8A30;
+                int light = kind == 4 ? 0xB0583A : kind == 5 ? 0x6A8A60 : kind == 3 ? 0x2E8A3E : kind == 2 ? 0x68B858 : 0x48B048;
                 if (!front)
                 {
                     R(sx0, 49, sx1 - sx0, 10, dark);
@@ -2342,6 +2458,16 @@ namespace TaskbarTamer
                 R(x - 5, 37, 10, 12, 0x404858); R(x - 4, 38, 8, 11, 0x80A0D0);
                 R(x - 15, 32, 7, 6, 0x88C8F0); R(x + 8, 32, 7, 6, 0x88C8F0);
             }
+            else if (b.Kind == 3)
+            {
+                int tc = Data.TypeColors[b.Type];
+                int dk = Shade(tc, 0.45f), lt = Shade(tc, -0.35f);
+                R(x - 30, 22, 60, 27, 0x3A3E4C); R(x - 29, 23, 58, 26, 0xF2F0EA);
+                R(x - 33, 16, 66, 7, dk); R(x - 31, 14, 62, 3, tc); R(x - 33, 22, 66, 1, Shade(tc, 0.6f));
+                for (int i = 0; i < 4; i++) { float cx = x - 25 + i * 15 + (i >= 2 ? 6 : 0); R(cx, 25, 4, 24, lt); R(cx + 3, 25, 1, 24, 0xC8C4BC); }
+                R(x - 7, 33, 14, 16, 0x3A3E4C); R(x - 6, 34, 12, 15, dk); R(x - 0.5f, 34, 1, 15, 0x3A3E4C);
+                R(x - 27, 27, 2, 2, tc); R(x + 25, 27, 2, 2, tc);
+            }
             else
             {
                 R(x - 17, 27, 34, 22, 0x604030); R(x - 16, 28, 32, 21, 0xF0E0C0);
@@ -2373,11 +2499,14 @@ namespace TaskbarTamer
             URect(401, 4.4f, 5.6f, 6.4f, 0x4AA8F0, 1.6f); URect(403.3f, 5.6f, 1, 4, 0xFFFFFF); URect(401.8f, 7.1f, 4, 1, 0xFFFFFF);
             Txt("Potions " + potions, 409, 3.6f, 5.6f, 0x1E2230);
 
+            DrawBadges(262, 2);
+
             if (bannerT > 0 && lastZone != null)
             {
                 int a = (int)(Math.Min(1, bannerT) * 220);
-                URect(185, 17, 110, 11, 0x14182A, 5.5f, a);
-                Txt(lastZone.Name, 240, 18.4f, 6.6f, 0xFFFFFF, 1);
+                URect(180, 17, 120, 15, 0x14182A, 6, a);
+                Txt(lastZone.Region.ToUpper() + " REGION", 240, 18.2f, 4.2f, 0xA8B0C8, 1);
+                Txt(lastZone.Name, 240, 22.6f, 6.6f, 0xFFFFFF, 1);
             }
             else if (hintT > 0 && curMsg == null)
             {
@@ -2385,6 +2514,27 @@ namespace TaskbarTamer
                 Txt("Arrows: walk  |  Z: talk  |  Tab: team  |  H: help", 240, 57.4f, 4.6f, 0xFFFFFF, 1);
             }
             if (crashNote != null) Txt("Oops: " + crashNote, 132, 4, 5, 0xE03030);
+        }
+
+        void DrawBadges(float x, float y)
+        {
+            Panel(x, y, 52, 12, 0xFFFFFF, 6, 235);
+            for (int i = 0; i < Data.BadgeNames.Length; i++)
+            {
+                float bx = x + 8.5f + i * 9, by = y + 6;
+                bool has = HasBadge(i);
+                int c = has ? Data.TypeColors[Data.BadgeTypes[i]] : 0xE2E5EC;
+                UPoly(has ? Shade(c, 0.4f) : 0xC8CCD6, bx, by - 4, bx + 3.6f, by, bx, by + 4, bx - 3.6f, by);
+                UPoly(c, bx, by - 3, bx + 2.7f, by, bx, by + 3, bx - 2.7f, by);
+                if (has) UPoly(0xFFFFFF, bx - 0.6f, by - 2, bx + 0.4f, by - 1, bx - 0.6f, by, bx - 1.6f, by - 1);
+            }
+            AddHit(new RectangleF(x, y, 52, 12), delegate
+            {
+                if (!Idle) return;
+                string got = "";
+                for (int i = 0; i < Data.BadgeNames.Length; i++) if (HasBadge(i)) got += (got.Length > 0 ? ", " : "") + Data.BadgeNames[i];
+                Say("Badges " + BadgeCount() + "/" + Data.BadgeNames.Length + (got.Length > 0 ? ": " + got + "." : ". Beat a gym leader to earn one!"));
+            });
         }
 
         void DrawMsgBox(float x, float y, float w, float h)
@@ -2423,7 +2573,7 @@ namespace TaskbarTamer
         {
             Panel(8, 2, 446, 60, 0xF7F8FB, 6);
             Txt("Your team", 14, 4, 6.5f, 0x1E2230);
-            Txt("Storage: " + box.Count, 60, 5, 5, 0x7A8090);
+            Txt("Storage: " + box.Count + "    Badges: " + BadgeCount() + "/" + Data.BadgeNames.Length, 60, 5, 5, 0x7A8090);
             Button(new RectangleF(254, 3.5f, 60, 9.5f), "Make lead", false, delegate { if (Idle) TeamLead(); }, 5.2f);
             Button(new RectangleF(317, 3.5f, 74, 9.5f), "Swap w/ storage", false, delegate { if (Idle) TeamStorage(); }, 5.2f);
             Button(new RectangleF(394, 3.5f, 54, 9.5f), "Close", false, delegate { if (Idle) mode = M_WORLD; }, 5.2f);

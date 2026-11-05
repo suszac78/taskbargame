@@ -67,7 +67,7 @@ static class Sim
         g.SimHold(Keys.Right, false);
         g.SimHold(Keys.Tab, true); g.SimHold(Keys.Tab, false); Steps(g, 3);
         Shot(g, Path.Combine(outDir, "8_team.png"));
-        foreach (float x in new float[] { 900, 1450, 2100 }) { g.SimHold(Keys.Escape, true); g.SimHold(Keys.Escape, false); g.DebugSetX(x); Steps(g, 2); g.DebugClearMsgs(); Shot(g, Path.Combine(outDir, "9_world_" + x + ".png")); }
+        foreach (float x in new float[] { 960, 1740, 2550, 3380, 3700, 4190, 4620 }) { g.SimHold(Keys.Escape, true); g.SimHold(Keys.Escape, false); g.DebugSetX(x); Steps(g, 2); g.DebugClearMsgs(); Shot(g, Path.Combine(outDir, "9_world_" + x + ".png")); }
         Console.WriteLine(File.ReadAllText(GameForm.SavePathOverride));
         return g.ChampWins >= 1 ? 0 : 1;
     }
