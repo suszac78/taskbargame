@@ -33,21 +33,19 @@ namespace TaskbarTamer
         const float WalkSpeed = 60f;
 
         class Ev { public string Msg; public Action Act; }
-        class TextCmd { public string S; public float X, Y, Size, W; public int Col; public int Align; }
         class Hit { public RectangleF R; public Action A; }
 
         // ---------- rendering ----------
         Bitmap low = new Bitmap(VW, VH);
-        Bitmap miniBmp = new Bitmap(24, 24);
         Graphics lg;
         float s = 2f;
-        List<TextCmd> texts = new List<TextCmd>();
         List<Hit> hits = new List<Hit>();
         Dictionary<int, SolidBrush> brushes = new Dictionary<int, SolidBrush>();
         Dictionary<int, Font> fonts = new Dictionary<int, Font>();
         Dictionary<string, Bitmap> sprites = new Dictionary<string, Bitmap>();
         StringFormat fmt, fmtWrap;
-        string fontName = "Segoe UI";
+        string fontName = "Segoe UI Semibold";
+        FontStyle fontStyle = FontStyle.Regular;
 
         // ---------- loop ----------
         Timer timer;
@@ -122,7 +120,10 @@ namespace TaskbarTamer
             fmt = new StringFormat(StringFormat.GenericTypographic);
             fmt.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoWrap;
             fmtWrap = new StringFormat(StringFormat.GenericTypographic);
-            using (Font test = new Font(fontName, 10)) { if (test.Name != fontName) fontName = test.Name; }
+            using (Font test = new Font(fontName, 10))
+            {
+                if (test.Name != fontName) { fontName = "Segoe UI"; fontStyle = FontStyle.Bold; }
+            }
 
             Text = "Taskbar Tamer";
             FormBorderStyle = FormBorderStyle.None;
@@ -158,6 +159,34 @@ namespace TaskbarTamer
                 cp.ExStyle |= 0x80 | 0x8; // tool window (no Alt+Tab, no taskbar button) + topmost
                 return cp;
             }
+        }
+
+        // ---------- rounded window corners ----------
+        [DllImport("dwmapi.dll")]
+        static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+        bool dwmRounded;
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            if (headless) return;
+            try { int round = 2; dwmRounded = DwmSetWindowAttribute(Handle, 33, ref round, 4) == 0; } // Windows 11
+            catch { dwmRounded = false; }
+            ApplyRoundRegion();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            ApplyRoundRegion();
+        }
+
+        // Older Windows has no rounded windows, so cut the corners ourselves.
+        void ApplyRoundRegion()
+        {
+            if (dwmRounded || headless || Width <= 0 || Height <= 0) return;
+            float r = mini ? Width / 2.5f : Math.Max(6, 5 * s);
+            using (GraphicsPath p = RoundRect(new RectangleF(0, 0, Width, Height), r)) Region = new Region(p);
         }
 
         // ---------- context menu ----------
@@ -1035,7 +1064,19 @@ namespace TaskbarTamer
 
         // =====================================================================
         // DRAWING HELPERS
+        // The world (sky, ground, buildings, grass, people) is pixel art drawn on a small canvas.
+        // Everything else (panels, buttons, bars, critters, text) goes on a smooth layer drawn
+        // at full resolution, in the order it was queued.
         // =====================================================================
+        const int K_RECT = 0, K_TEXT = 1, K_WRAP = 2, K_IMG = 3, K_ELL = 4, K_POLY = 5;
+        class Ui
+        {
+            public int Kind; public float X, Y, W, H, R, Clip = -1, Size;
+            public int Fill, Border = -1, Alpha = 255, Align;
+            public string S; public Bitmap Img; public PointF[] Pts;
+        }
+        List<Ui> ui = new List<Ui>();
+
         SolidBrush Br(int rgb, int a = 255)
         {
             int key = (a << 24) | (rgb & 0xFFFFFF);
@@ -1044,47 +1085,76 @@ namespace TaskbarTamer
             return b;
         }
 
+        // pixel-art canvas
         void R(float x, float y, float w, float h, int rgb, int a = 255) { lg.FillRectangle(Br(rgb, a), x, y, w, h); }
-
         void Tri(float x1, float y1, float x2, float y2, float x3, float y3, int rgb)
         {
             lg.FillPolygon(Br(rgb), new PointF[] { new PointF(x1, y1), new PointF(x2, y2), new PointF(x3, y3) });
         }
+        void Blit(Bitmap b, float x, float y, float w, float h)
+        {
+            lg.DrawImage(b, new RectangleF((float)Math.Round(x), (float)Math.Round(y), w, h));
+        }
 
+        // smooth layer
+        Ui Q(int kind) { Ui u = new Ui(); u.Kind = kind; ui.Add(u); return u; }
+        void URect(float x, float y, float w, float h, int fill, float r = 0, int alpha = 255, int border = -1)
+        {
+            Ui u = Q(K_RECT); u.X = x; u.Y = y; u.W = w; u.H = h; u.Fill = fill; u.R = r; u.Alpha = alpha; u.Border = border;
+        }
+        void UEll(float x, float y, float w, float h, int fill, int alpha = 255, int border = -1)
+        {
+            Ui u = Q(K_ELL); u.X = x; u.Y = y; u.W = w; u.H = h; u.Fill = fill; u.Alpha = alpha; u.Border = border;
+        }
+        void UPoly(int fill, params float[] xy)
+        {
+            Ui u = Q(K_POLY); u.Fill = fill; u.Pts = new PointF[xy.Length / 2];
+            for (int i = 0; i < u.Pts.Length; i++) u.Pts[i] = new PointF(xy[i * 2], xy[i * 2 + 1]);
+        }
+        void UImg(Bitmap b, float x, float y, float w, float h, float clipY = -1)
+        {
+            Ui u = Q(K_IMG); u.Img = b; u.X = x; u.Y = y; u.W = w; u.H = h; u.Clip = clipY;
+        }
         void Txt(string str, float x, float y, float size, int col, int align = 0)
         {
-            TextCmd c = new TextCmd(); c.S = str; c.X = x; c.Y = y; c.Size = size; c.Col = col; c.Align = align;
-            texts.Add(c);
+            Ui u = Q(K_TEXT); u.S = str; u.X = x; u.Y = y; u.Size = size; u.Fill = col; u.Align = align;
         }
-
         void TxtWrap(string str, float x, float y, float w, float size, int col)
         {
-            TextCmd c = new TextCmd(); c.S = str; c.X = x; c.Y = y; c.W = w; c.Size = size; c.Col = col;
-            texts.Add(c);
-        }
-
-        // Hides text queued earlier that sits under a panel drawn on top of it.
-        void Cover(float x, float y, float w, float h)
-        {
-            texts.RemoveAll(delegate(TextCmd c) { return c.X >= x - 2 && c.X <= x + w && c.Y >= y - 4 && c.Y <= y + h; });
+            Ui u = Q(K_WRAP); u.S = str; u.X = x; u.Y = y; u.W = w; u.Size = size; u.Fill = col;
         }
 
         void AddHit(RectangleF r, Action a) { Hit h = new Hit(); h.R = r; h.A = a; hits.Add(h); }
 
-        void PanelBox(float x, float y, float w, float h, int fill, int border)
+        // A rounded card with a soft shadow.
+        void Panel(float x, float y, float w, float h, int fill = 0xFFFFFF, float r = 3.5f, int alpha = 245)
         {
-            R(x + 1, y, w - 2, h, border);
-            R(x, y + 1, w, h - 2, border);
-            R(x + 1, y + 1, w - 2, h - 2, fill);
+            URect(x + 0.4f, y + 0.9f, w, h, 0x101020, r, 45);
+            URect(x, y, w, h, fill, r, alpha, 0xD8DCE6);
         }
 
         void HpBar(float x, float y, float w, float cur, float max)
         {
             float f = max <= 0 ? 0 : Math.Max(0, Math.Min(1, cur / max));
-            R(x - 1, y - 1, w + 2, 4, 0x303040);
-            R(x, y, w, 2, 0x585868);
-            int col = f > 0.5f ? 0x48D058 : f > 0.2f ? 0xF0C030 : 0xE84030;
-            R(x, y, w * f, 2, col);
+            URect(x, y, w, 3, 0x2C3040, 1.5f);
+            int col = f > 0.5f ? 0x4CD964 : f > 0.2f ? 0xFFC233 : 0xFF5A4E;
+            if (f > 0) URect(x + 0.5f, y + 0.5f, Math.Max(2, (w - 1) * f), 2, col, 1);
+        }
+
+        void TypeTag(int type, float x, float y, float w = 22)
+        {
+            URect(x, y, w, 6.4f, Data.TypeColors[type], 3.2f);
+            Txt(Data.TypeNames[type], x + w / 2, y + 1.1f, 3.9f, 0xFFFFFF, 1);
+        }
+
+        void Button(RectangleF r, string label, bool on, Action a, float size = 6.2f, int tag = -1)
+        {
+            URect(r.X, r.Y + 0.5f, r.Width, r.Height, on ? 0xE09020 : 0x101020, 3, on ? 90 : 25);
+            URect(r.X, r.Y, r.Width, r.Height, on ? 0xFFF3D0 : 0xF6F7FA, 3, 255, on ? 0xF0A830 : 0xD8DCE6);
+            float tx = r.X + 6;
+            if (tag >= 0) { UEll(r.X + 4, r.Y + r.Height / 2 - 1.6f, 3.2f, 3.2f, tag); tx = r.X + 10; }
+            Txt(label, tx, r.Y + (r.Height - size) / 2 - 0.5f, size, 0x1E2230);
+            AddHit(r, a);
         }
 
         Bitmap MonSprite(int sp, bool flip)
@@ -1094,11 +1164,19 @@ namespace TaskbarTamer
             if (sprites.TryGetValue(key, out b)) return b;
             SpeciesDef d = Data.Species[sp];
             Dictionary<char, Color> pal = new Dictionary<char, Color>();
-            pal['k'] = Data.C(0x181820); pal['w'] = Data.C(0xFFFFFF); pal['e'] = Data.C(0x101018);
+            pal['k'] = Data.C(0x1A1A24); pal['w'] = Data.C(0xFFFFFF); pal['e'] = Data.C(0x14141C);
+            pal['p'] = Data.C(0xF07888); pal['c'] = Data.C(0xFFF4DC);
             pal['1'] = Data.C(d.Pal[0]); pal['2'] = Data.C(d.Pal[1]); pal['3'] = Data.C(d.Pal[2]);
-            b = Data.MakeSprite(Data.Sprites[d.Sprite], 16, pal, flip);
+            pal['h'] = Mix(d.Pal[0], 0xFFFFFF, 0.45f); pal['4'] = Mix(d.Pal[2], 0x000000, 0.3f);
+            b = Data.MakeSprite(Data.Sprites[d.Sprite], 24, pal, flip);
             sprites[key] = b;
             return b;
+        }
+
+        static Color Mix(int a, int b, float f)
+        {
+            Color ca = Data.C(a), cb = Data.C(b);
+            return Color.FromArgb(255, (int)(ca.R + (cb.R - ca.R) * f), (int)(ca.G + (cb.G - ca.G) * f), (int)(ca.B + (cb.B - ca.B) * f));
         }
 
         Bitmap PersonSprite(int look, int frame, bool flip)
@@ -1108,16 +1186,14 @@ namespace TaskbarTamer
             if (sprites.TryGetValue(key, out b)) return b;
             int[] lk = Data.Looks[look];
             Dictionary<char, Color> pal = new Dictionary<char, Color>();
-            pal['k'] = Data.C(0x181820); pal['e'] = Data.C(0x181820); pal['w'] = Data.C(0xFFFFFF);
-            pal['s'] = Data.C(0xF8C8A0); pal['3'] = Data.C(lk[0]); pal['b'] = Data.C(lk[1]); pal['d'] = Data.C(lk[2]);
-            b = Data.MakeSprite(frame == 0 ? Data.Person1 : Data.Person2, 8, pal, flip);
+            pal['k'] = Data.C(0x1A1A24); pal['e'] = Data.C(0x1A1A24); pal['w'] = Data.C(0xFFFFFF);
+            pal['s'] = Data.C(0xF8C8A0); pal['o'] = Data.C(0x5A3A30);
+            pal['3'] = Data.C(lk[0]); pal['h'] = Mix(lk[0], 0xFFFFFF, 0.4f);
+            pal['b'] = Data.C(lk[1]); pal['c'] = Mix(lk[1], 0xFFFFFF, 0.35f);
+            pal['d'] = Data.C(lk[2]); pal['a'] = Data.C(lk[3]); pal['g'] = Data.C(lk[4]);
+            b = Data.MakeSprite(frame == 0 ? Data.Person1 : Data.Person2, 10, pal, flip);
             sprites[key] = b;
             return b;
-        }
-
-        void Blit(Bitmap b, float x, float y, float w, float h)
-        {
-            lg.DrawImage(b, new RectangleF((float)Math.Round(x), (float)Math.Round(y), w, h));
         }
 
         float Cam() { return Math.Max(0, Math.Min(Data.WorldW - VW, px - VW / 2)); }
@@ -1141,53 +1217,110 @@ namespace TaskbarTamer
 
         public void RenderTo(Graphics g, int w, int h)
         {
-            texts.Clear();
+            ui.Clear();
             hits.Clear();
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
+            float sc;
             if (mini)
             {
+                sc = w / 24f;
+                g.Clear(Data.C(0xF6F7FA));
                 DrawMini();
-                g.DrawImage(miniBmp, new Rectangle(0, 0, w, h));
-                return;
             }
-            float sc = w / (float)VW;
-            lg.Clear(Color.Black);
-            try
+            else
             {
-                if (mode == M_BATTLE) DrawBattle();
-                else
+                sc = w / (float)VW;
+                lg.Clear(Color.Black);
+                try
                 {
-                    DrawWorld();
-                    if (mode == M_STARTER) DrawStarter();
-                    else if (mode == M_TEAM) DrawTeam();
-                    else if (mode == M_SHOP) DrawShop();
-                    if (curMsg != null) DrawMsgBox(110, 15, 260, 29);
+                    if (mode == M_BATTLE) DrawBattle();
+                    else
+                    {
+                        DrawWorld();
+                        if (mode == M_STARTER) DrawStarter();
+                        else if (mode == M_TEAM) DrawTeam();
+                        else if (mode == M_SHOP) DrawShop();
+                        if (curMsg != null) DrawMsgBox(110, 16, 260, 28);
+                    }
+                    DrawChrome();
                 }
-                DrawChrome();
+                catch (Exception ex) { Txt("Draw error: " + ex.Message, 10, 20, 6, 0xFFFFFF); }
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(low, new Rectangle(0, 0, w, h));
             }
-            catch (Exception ex) { Txt("Draw error: " + ex.Message, 10, 20, 6, 0xFFFFFF); }
+            FlushUi(g, sc);
+        }
 
-            g.DrawImage(low, new Rectangle(0, 0, w, h));
+        static GraphicsPath RoundRect(RectangleF r, float rad)
+        {
+            GraphicsPath p = new GraphicsPath();
+            rad = Math.Min(rad, Math.Min(r.Width, r.Height) / 2);
+            if (rad <= 0.5f) { p.AddRectangle(r); return p; }
+            float d = rad * 2;
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        void FlushUi(Graphics g, float sc)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            g.PixelOffsetMode = PixelOffsetMode.Default;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            foreach (TextCmd c in texts)
+            float bw = Math.Max(1f, sc * 0.45f);
+            foreach (Ui u in ui)
             {
-                Font f = GetFont(c.Size * sc);
-                SolidBrush b = Br(c.Col);
-                if (c.W > 0)
+                RectangleF r = new RectangleF(u.X * sc, u.Y * sc, u.W * sc, u.H * sc);
+                switch (u.Kind)
                 {
-                    g.DrawString(c.S, f, b, new RectangleF(c.X * sc, c.Y * sc, c.W * sc, VH * sc), fmtWrap);
-                    continue;
+                    case K_RECT:
+                        using (GraphicsPath p = RoundRect(r, u.R * sc))
+                        {
+                            g.FillPath(Br(u.Fill, u.Alpha), p);
+                            if (u.Border >= 0) using (Pen pen = new Pen(Data.C(u.Border), bw)) g.DrawPath(pen, p);
+                        }
+                        break;
+                    case K_ELL:
+                        g.FillEllipse(Br(u.Fill, u.Alpha), r);
+                        if (u.Border >= 0) using (Pen pen = new Pen(Data.C(u.Border), bw)) g.DrawEllipse(pen, r);
+                        break;
+                    case K_POLY:
+                        {
+                            PointF[] pts = new PointF[u.Pts.Length];
+                            for (int i = 0; i < pts.Length; i++) pts[i] = new PointF(u.Pts[i].X * sc, u.Pts[i].Y * sc);
+                            g.FillPolygon(Br(u.Fill), pts);
+                        }
+                        break;
+                    case K_IMG:
+                        {
+                            InterpolationMode im = g.InterpolationMode; PixelOffsetMode pm = g.PixelOffsetMode;
+                            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                            g.PixelOffsetMode = PixelOffsetMode.Half;
+                            if (u.Clip >= 0) g.SetClip(new RectangleF(0, 0, 100000, u.Clip * sc));
+                            g.DrawImage(u.Img, new Rectangle((int)Math.Round(r.X), (int)Math.Round(r.Y), (int)Math.Round(r.Width), (int)Math.Round(r.Height)));
+                            if (u.Clip >= 0) g.ResetClip();
+                            g.InterpolationMode = im; g.PixelOffsetMode = pm;
+                        }
+                        break;
+                    case K_TEXT:
+                        {
+                            Font f = GetFont(u.Size * sc);
+                            float x = r.X;
+                            if (u.Align != 0)
+                            {
+                                SizeF sz = g.MeasureString(u.S, f, PointF.Empty, fmt);
+                                x -= u.Align == 1 ? sz.Width / 2 : sz.Width;
+                            }
+                            g.DrawString(u.S, f, Br(u.Fill), x, r.Y, fmt);
+                        }
+                        break;
+                    case K_WRAP:
+                        g.DrawString(u.S, GetFont(u.Size * sc), Br(u.Fill), new RectangleF(r.X, r.Y, r.Width, 100000), fmtWrap);
+                        break;
                 }
-                float x = c.X * sc;
-                if (c.Align != 0)
-                {
-                    SizeF sz = g.MeasureString(c.S, f, PointF.Empty, fmt);
-                    x -= c.Align == 1 ? sz.Width / 2 : sz.Width;
-                }
-                g.DrawString(c.S, f, b, x, c.Y * sc, fmt);
             }
         }
 
@@ -1197,7 +1330,7 @@ namespace TaskbarTamer
             Font f;
             if (!fonts.TryGetValue(key, out f))
             {
-                f = new Font(fontName, Math.Max(4f, key / 4f), FontStyle.Bold, GraphicsUnit.Pixel);
+                f = new Font(fontName, Math.Max(4f, key / 4f), fontStyle, GraphicsUnit.Pixel);
                 fonts[key] = f;
             }
             return f;
@@ -1205,38 +1338,29 @@ namespace TaskbarTamer
 
         void DrawChrome()
         {
-            // drag grip on the left edge
-            R(0, 0, 6, VH, 0x202030, 200);
-            for (int y = 8; y < VH - 6; y += 4) { R(2, y, 1, 1, 0xA0A0B8); R(4, y + 2, 1, 1, 0xA0A0B8); }
+            // drag handle on the left edge
+            URect(1.6f, 18, 2.4f, 28, 0xFFFFFF, 1.2f, 130);
             // minimise and close buttons
-            RectangleF mn = new RectangleF(457, 2, 10, 9), cl = new RectangleF(468, 2, 10, 9);
-            PanelBox(mn.X, mn.Y, mn.Width, mn.Height, 0xF0F0F0, 0x303040);
-            R(mn.X + 3, mn.Y + 5, 4, 1, 0x303040);
-            PanelBox(cl.X, cl.Y, cl.Width, cl.Height, 0xF07060, 0x303040);
-            for (int i = 0; i < 4; i++) { R(cl.X + 3 + i, cl.Y + 2.5f + i, 1, 1, 0xFFFFFF); R(cl.X + 6 - i, cl.Y + 2.5f + i, 1, 1, 0xFFFFFF); }
+            RectangleF mn = new RectangleF(456.5f, 2, 9, 9), cl = new RectangleF(467.5f, 2, 9, 9);
+            UEll(mn.X, mn.Y + 0.4f, 9, 9, 0x101020, 50);
+            UEll(mn.X, mn.Y, 9, 9, 0xF6F7FA, 255, 0xC8CCD8);
+            URect(mn.X + 2.6f, mn.Y + 4.1f, 3.8f, 0.9f, 0x3A3E50, 0.45f);
+            UEll(cl.X, cl.Y + 0.4f, 9, 9, 0x101020, 50);
+            UEll(cl.X, cl.Y, 9, 9, 0xFF5F57);
+            float cx = cl.X + 4.5f, cy = cl.Y + 4.5f, a = 1.7f, t2 = 0.45f;
+            UPoly(0xFFFFFF, cx - a - t2, cy - a + t2, cx - a + t2, cy - a - t2, cx + a + t2, cy + a - t2, cx + a - t2, cy + a + t2);
+            UPoly(0xFFFFFF, cx + a - t2, cy - a - t2, cx + a + t2, cy - a + t2, cx - a + t2, cy + a + t2, cx - a - t2, cy + a - t2);
             AddHit(mn, delegate { SetMini(true); });
             AddHit(cl, delegate { Close(); });
         }
 
         void DrawMini()
         {
-            using (Graphics mg = Graphics.FromImage(miniBmp))
-            {
-                Graphics keep = lg;
-                lg = mg;
-                mg.InterpolationMode = InterpolationMode.NearestNeighbor;
-                mg.PixelOffsetMode = PixelOffsetMode.Half;
-                mg.Clear(Color.FromArgb(255, 0x20, 0x20, 0x30));
-                PanelBox(0, 0, 24, 24, 0xF8F4E8, 0x303040);
-                if (party.Count > 0)
-                {
-                    Mon m = party[0];
-                    float bob = (float)Math.Round(Math.Sin(t * 3) * 0.6);
-                    Blit(MonSprite(m.Sp, false), 4, 1 + bob, 16, 16);
-                    HpBar(3, 19, 18, m.Hp, m.MaxHp);
-                }
-                lg = keep;
-            }
+            if (party.Count == 0) return;
+            Mon m = party[0];
+            float bob = (float)Math.Round(Math.Sin(t * 3) * 0.6);
+            UImg(MonSprite(m.Sp, false), 3, 0.5f + bob, 18, 18);
+            HpBar(3.5f, 19.5f, 17, m.Hp, m.MaxHp);
         }
 
         // ---------- world ----------
@@ -1262,7 +1386,7 @@ namespace TaskbarTamer
                 float sx = Data.Zones[i].X0 - cam;
                 if (sx < -10 || sx > VW + 10) continue;
                 R(sx - 1, 38, 2, 10, 0x6A4A30);
-                PanelBox(sx - 7, 33, 14, 7, 0xE8D0A0, 0x6A4A30);
+                R(sx - 7, 33, 14, 7, 0x6A4A30); R(sx - 6, 34, 12, 5, 0xE8D0A0);
                 Tri(sx + 1, 34.5f, sx + 1, 38.5f, sx + 4, 36.5f, 0x6A4A30);
                 R(sx - 4, 36, 5, 1, 0x6A4A30);
             }
@@ -1273,28 +1397,28 @@ namespace TaskbarTamer
             DrawGrass(cam, false);
 
             // professor before you have a partner
-            if (party.Count == 0) Blit(PersonSprite(5, 0, true), 172 - cam - 4, 45, 8, 12);
+            if (party.Count == 0) Blit(PersonSprite(5, 0, true), 172 - cam - 5, 41, 10, 16);
 
             for (int i = 0; i < Data.Trainers.Length; i++)
             {
                 TrainerDef tr = Data.Trainers[i];
                 float sx = tr.X - cam;
                 if (sx < -10 || sx > VW + 10) continue;
-                Blit(PersonSprite(tr.Look, 0, true), sx - 4, 45, 8, 12);
-                if (tr.Champion) { R(sx - 2, 43, 5, 2, 0xF0C030); R(sx - 2, 42, 1, 1, 0xF0C030); R(sx, 42, 1, 1, 0xF0C030); R(sx + 2, 42, 1, 1, 0xF0C030); }
+                Blit(PersonSprite(tr.Look, 0, true), sx - 5, 41, 10, 16);
+                if (tr.Champion) { R(sx - 2, 39, 5, 2, 0xF0C030); R(sx - 2, 38, 1, 1, 0xF0C030); R(sx, 38, 1, 1, 0xF0C030); R(sx + 2, 38, 1, 1, 0xF0C030); }
                 if (!Beaten(i) && Math.Abs(px - tr.X) < 80 && mode == M_WORLD)
                 {
-                    PanelBox(sx - 3, 34, 7, 8, 0xFFFFFF, 0x303040);
-                    R(sx, 35.5f, 1, 3, 0xE03030); R(sx, 39.5f, 1, 1, 0xE03030);
+                    float bob = (float)Math.Round(Math.Sin(t * 6) * 0.6, 1);
+                    URect(sx - 3.5f, 29 + bob, 8, 8, 0xFFFFFF, 2.5f, 255, 0xD8DCE6);
+                    Txt("!", sx + 0.5f, 29.6f + bob, 6.5f, 0xFF4040, 1);
                 }
             }
 
             // player
-            if (party.Count > 0 || mode == M_STARTER || true)
             {
                 int frame = walking && ((int)(walkAnim / 0.14f)) % 2 == 1 ? 1 : 0;
                 float bob = walking && frame == 1 ? -1 : 0;
-                Blit(PersonSprite(0, frame, facing < 0), px - cam - 4, 45 + bob, 8, 12);
+                Blit(PersonSprite(0, frame, facing < 0), px - cam - 5, 41 + bob, 10, 16);
             }
 
             DrawGrass(cam, true);
@@ -1302,18 +1426,27 @@ namespace TaskbarTamer
             // night tint
             if (TimeOfDay() == 2 && kind != 4) R(0, 0, VW, VH, 0x101040, 60);
 
+            // building signs (smooth layer)
+            foreach (BuildingDef b in Data.Buildings)
+            {
+                float x = b.X - cam;
+                if (x < -40 || x > VW + 40) continue;
+                if (b.Kind == 0) { URect(x - 10, 15.5f, 20, 7, 0xFFFFFF, 2, 255, 0xE04848); Txt("REST", x, 16.3f, 4.6f, 0xD03030, 1); }
+                else if (b.Kind == 1) { URect(x - 10, 20.5f, 20, 6.5f, 0x2F5FC0, 2); Txt("SHOP", x, 21.2f, 4.6f, 0xFFFFFF, 1); }
+            }
+
             // interact hint
             if (mode == M_WORLD && Idle && party.Count > 0)
             {
                 int b = NearBuilding();
-                float hx = -100, hy = 1;
+                float hx = -100, hy = 3;
                 if (b >= 0) hx = Data.Buildings[b].X - cam;
-                else if (NearChampion()) { hx = Data.Trainers[Data.Trainers.Length - 1].X - cam; hy = 31; }
+                else if (NearChampion()) { hx = Data.Trainers[Data.Trainers.Length - 1].X - cam; hy = 27; }
                 if (hx > -50)
                 {
-                    float bob = (float)Math.Round(Math.Sin(t * 5));
-                    PanelBox(hx - 5, hy + bob, 11, 9, 0xFFFFFF, 0x303040);
-                    Txt("Z", hx + 0.5f, hy + 1 + bob, 6, 0x303040, 1);
+                    float bob = (float)Math.Round(Math.Sin(t * 5) * 0.8, 1);
+                    URect(hx - 5, hy + bob, 10, 9, 0x1E2230, 3, 230);
+                    Txt("Z", hx, hy + 1.2f + bob, 6, 0xFFFFFF, 1);
                 }
             }
 
@@ -1341,7 +1474,9 @@ namespace TaskbarTamer
                         float sx = Mod(Hash(i * 7 + 3) % 997 - cam * 0.05f, VW);
                         if ((int)(t * 2 + i) % 7 != 0) R(sx, Hash(i * 13) % 34, 1, 1, 0xFFFFFF);
                     }
-                    R(Mod(400 - cam * 0.02f, VW), 5, 6, 6, 0xF0F0D0); R(Mod(402 - cam * 0.02f, VW), 5, 4, 4, sky[0]);
+                    float mx = Mod(400 - cam * 0.02f, VW);
+                    lg.FillEllipse(Br(0xF4F0D0), mx, 4, 8, 8);
+                    lg.FillEllipse(Br(sky[0]), mx + 2.5f, 2.5f, 7, 7);
                 }
                 else
                 {
@@ -1427,7 +1562,6 @@ namespace TaskbarTamer
                 int pathB = kind == 2 ? 0xC8B078 : kind == 3 ? 0x7A5A38 : kind == 4 ? 0x302420 : 0xB8A070;
                 R(0, 52, VW, 7, pathA);
                 R(0, 52, VW, 1, pathB); R(0, 58, VW, 1, pathB);
-                // little ground details
                 int first = (int)(cam / 13);
                 for (int i = first; i < first + VW / 13 + 2; i++)
                 {
@@ -1456,7 +1590,8 @@ namespace TaskbarTamer
                     for (float x = sx0; x < sx1 - 3; x += 4)
                     {
                         float sway = (float)Math.Round(Math.Sin(t * 2 + x * 0.3) * 0.6);
-                        Tri(x, 50, x + 2 + sway, 43, x + 4, 50, dark);
+                        float top = 42 + Hash((int)(x + cam)) % 3;
+                        Tri(x, 50, x + 2 + sway, top, x + 4, 50, dark);
                     }
                 }
                 else
@@ -1477,27 +1612,24 @@ namespace TaskbarTamer
             if (x < -40 || x > VW + 40) return;
             if (b.Kind == 0)
             {
-                PanelBox(x - 20, 24, 40, 25, 0xF4F0E8, 0x504048);
+                R(x - 20, 24, 40, 25, 0x504048); R(x - 19, 25, 38, 24, 0xF4F0E8);
                 Tri(x - 24, 25, x, 11, x + 24, 25, 0xD04040);
                 R(x - 22, 24, 44, 2, 0xA02828);
                 R(x - 5, 37, 10, 12, 0x6A4A3A); R(x - 4, 38, 8, 11, 0x8A6A50);
                 R(x - 16, 30, 7, 2, 0xE03838); R(x - 13.5f, 27.5f, 2, 7, 0xE03838);
                 R(x + 10, 29, 6, 5, 0x88C8F0); R(x + 10, 31, 6, 1, 0x504048);
-                PanelBox(x - 9, 15, 18, 7, 0xFFFFFF, 0xA02828);
-                Txt("REST", x, 15.6f, 5, 0xA02828, 1);
             }
             else if (b.Kind == 1)
             {
-                PanelBox(x - 18, 26, 36, 23, 0xE8E8F0, 0x404858);
+                R(x - 18, 26, 36, 23, 0x404858); R(x - 17, 27, 34, 22, 0xE8E8F0);
                 R(x - 21, 20, 42, 7, 0x3060C0);
                 for (int i = 0; i < 7; i++) R(x - 21 + i * 6, 26, 3, 3, i % 2 == 0 ? 0x3060C0 : 0xFFFFFF);
                 R(x - 5, 37, 10, 12, 0x404858); R(x - 4, 38, 8, 11, 0x80A0D0);
                 R(x - 15, 32, 7, 6, 0x88C8F0); R(x + 8, 32, 7, 6, 0x88C8F0);
-                Txt("SHOP", x, 20.8f, 5, 0xFFFFFF, 1);
             }
             else
             {
-                PanelBox(x - 17, 27, 34, 22, 0xF0E0C0, 0x604030);
+                R(x - 17, 27, 34, 22, 0x604030); R(x - 16, 28, 32, 21, 0xF0E0C0);
                 Tri(x - 21, 28, x, 14, x + 21, 28, 0x8A4A2A);
                 R(x + 8, 17, 4, 8, 0x705048);
                 R(x - 4, 38, 8, 11, 0x7A5030);
@@ -1510,56 +1642,48 @@ namespace TaskbarTamer
         {
             if (party.Count == 0) return;
             Mon m = party[0];
-            PanelBox(9, 2, 118, 12, 0xF8F4E8, 0x303040);
-            Txt(m.Name + " Lv" + m.Level, 12, 3.4f, 6, 0x303040);
-            HpBar(78, 7, 45, m.DispHp, m.MaxHp);
+            Panel(9, 2, 118, 12, 0xFFFFFF, 6, 235);
+            UImg(MonSprite(m.Sp, false), 10.5f, 2.6f, 10.5f, 10.5f);
+            Txt(m.Name, 23, 3.6f, 5.6f, 0x1E2230);
+            Txt("Lv" + m.Level, 76, 4.2f, 4.6f, 0x7A8090, 2);
+            HpBar(80, 6.6f, 43, m.DispHp, m.MaxHp);
             AddHit(new RectangleF(9, 2, 118, 12), delegate { if (Idle) OpenTeam(); });
 
-            PanelBox(318, 2, 134, 12, 0xF8F4E8, 0x303040);
-            R(322, 5, 5, 5, 0xF0C030); R(323, 6, 3, 3, 0xF8E070);
-            Txt(coins.ToString(), 329, 3.4f, 6, 0x303040);
-            R(360, 5, 5, 5, 0xE03838); R(360, 7.5f, 5, 1, 0x303040); R(361.5f, 7, 2, 2, 0xFFFFFF);
-            Txt("Orbs " + orbs, 367, 3.4f, 6, 0x303040);
-            R(403, 5, 5, 5, 0x60B0F0); R(405, 4, 1, 1, 0x303040);
-            Txt("Potions " + potions, 410, 3.4f, 6, 0x303040);
+            Panel(318, 2, 134, 12, 0xFFFFFF, 6, 235);
+            UEll(323, 4.6f, 6, 6, 0xF5B800, 255, 0xC08800); UEll(324.8f, 6.2f, 2.4f, 2.4f, 0xFFE070);
+            Txt(coins.ToString(), 331, 3.6f, 5.6f, 0x1E2230);
+            UEll(359, 4.6f, 6, 6, 0xFF4D4D, 255, 0x2A2A38); URect(359.3f, 7.3f, 5.4f, 0.6f, 0x2A2A38);
+            UEll(361.2f, 6.8f, 1.6f, 1.6f, 0xFFFFFF, 255, 0x2A2A38);
+            Txt("Orbs " + orbs, 367, 3.6f, 5.6f, 0x1E2230);
+            URect(401, 4.4f, 5.6f, 6.4f, 0x4AA8F0, 1.6f); URect(403.3f, 5.6f, 1, 4, 0xFFFFFF); URect(401.8f, 7.1f, 4, 1, 0xFFFFFF);
+            Txt("Potions " + potions, 409, 3.6f, 5.6f, 0x1E2230);
 
             if (bannerT > 0 && lastZone != null)
             {
-                int a = (int)(Math.Min(1, bannerT) * 230);
-                R(180, 17, 120, 11, 0x202030, a);
-                Txt(lastZone.Name, 240, 18.2f, 7, 0xFFFFFF, 1);
+                int a = (int)(Math.Min(1, bannerT) * 220);
+                URect(185, 17, 110, 11, 0x14182A, 5.5f, a);
+                Txt(lastZone.Name, 240, 18.4f, 6.6f, 0xFFFFFF, 1);
             }
             else if (hintT > 0 && curMsg == null)
             {
-                R(150, 58, 180, 6, 0x202030, 170);
-                Txt("Arrows: walk | Z: talk | Tab: team | H: help", 240, 58.2f, 5, 0xFFFFFF, 1);
+                URect(148, 56.5f, 184, 6.5f, 0x14182A, 3.2f, 170);
+                Txt("Arrows: walk  |  Z: talk  |  Tab: team  |  H: help", 240, 57.4f, 4.6f, 0xFFFFFF, 1);
             }
             if (crashNote != null) Txt("Oops: " + crashNote, 132, 4, 5, 0xE03030);
         }
 
         void DrawMsgBox(float x, float y, float w, float h)
         {
-            Cover(x, y, w, h);
-            PanelBox(x, y, w, h, 0xFFFFFF, 0x303040);
-            R(x + 2, y + 2, w - 4, 1, 0xE8E8F0);
-            TxtWrap(curMsg, x + 4, y + 3, w - 10, 7, 0x202030);
-            if (((int)(t * 3)) % 2 == 0) Tri(x + w - 8, y + h - 6, x + w - 4, y + h - 6, x + w - 6, y + h - 3, 0x303040);
-        }
-
-        void Button(RectangleF r, string label, bool on, Action a, float size = 6.5f, int tag = -1)
-        {
-            PanelBox(r.X, r.Y, r.Width, r.Height, on ? 0xFFF0B8 : 0xF8F8F8, on ? 0xE09020 : 0x8088A0);
-            if (tag >= 0) R(r.X + 1, r.Y + 1, 2, r.Height - 2, tag);
-            if (on) Tri(r.X + 4, r.Y + r.Height / 2 - 2, r.X + 4, r.Y + r.Height / 2 + 2, r.X + 6, r.Y + r.Height / 2, 0x303040);
-            Txt(label, r.X + 8, r.Y + (r.Height - size) / 2 - 0.6f, size, 0x202030);
-            AddHit(r, a);
+            Panel(x, y, w, h, 0xFFFFFF, 4, 250);
+            TxtWrap(curMsg, x + 6, y + 4, w - 14, 6.8f, 0x1E2230);
+            float bob = (float)Math.Round(Math.Sin(t * 6) * 0.6, 1);
+            UPoly(0x8A90A0, x + w - 9, y + h - 6.5f + bob, x + w - 5, y + h - 6.5f + bob, x + w - 7, y + h - 4 + bob);
         }
 
         void DrawStarter()
         {
-            Cover(60, 3, 360, 58);
-            PanelBox(60, 3, 360, 58, 0xF8F4E8, 0x303040);
-            Txt("Choose your partner!", 240, 5, 7, 0x303040, 1);
+            Panel(60, 3, 360, 58, 0xF7F8FB, 6);
+            Txt("Choose your partner!", 240, 5.2f, 7, 0x1E2230, 1);
             for (int i = 0; i < 3; i++)
             {
                 int ii = i;
@@ -1567,44 +1691,44 @@ namespace TaskbarTamer
                 SpeciesDef d = Data.Species[Data.Starters[i]];
                 bool on = cursor == i;
                 RectangleF r = new RectangleF(cx - 52, 14, 104, 44);
-                PanelBox(r.X, r.Y, r.Width, r.Height, on ? 0xFFF0B8 : 0xFFFFFF, on ? 0xE09020 : 0xB0B0C0);
-                float bob = on ? (float)Math.Round(Math.Sin(t * 6)) : 0;
-                Blit(MonSprite(Data.Starters[i], false), cx - 46, 20 + bob, 32, 32);
-                Txt(d.Name, cx - 10, 22, 7, 0x202030);
-                R(cx - 10, 32, 34, 8, Data.TypeColors[d.Type]);
-                Txt(Data.TypeNames[d.Type], cx + 7, 32.6f, 5, 0xFFFFFF, 1);
+                URect(r.X, r.Y + 0.6f, r.Width, r.Height, on ? 0xE09020 : 0x101020, 5, on ? 70 : 25);
+                URect(r.X, r.Y, r.Width, r.Height, on ? 0xFFF3D0 : 0xFFFFFF, 5, 255, on ? 0xF0A830 : 0xE0E3EA);
+                float bob = on ? (float)Math.Round(Math.Sin(t * 6) * 1.2, 1) : 0;
+                UEll(cx - 46, 49, 32, 6, 0x101020, 30);
+                UImg(MonSprite(Data.Starters[i], false), cx - 47, 17 + bob, 34, 34);
+                Txt(d.Name, cx - 8, 21, 7, 0x1E2230);
+                TypeTag(d.Type, cx - 8, 31, 28);
                 string[] blurb = { "Fiery & fast", "Calm & sturdy", "Tough & leafy" };
-                Txt(blurb[i], cx - 10, 43, 5.5f, 0x505060);
+                Txt(blurb[i], cx - 8, 41, 5.4f, 0x6A7080);
                 AddHit(r, delegate { if (!Idle) return; if (cursor == ii) PickStarter(ii); else cursor = ii; });
             }
         }
 
         void DrawTeam()
         {
-            Cover(8, 2, 446, 60);
-            PanelBox(8, 2, 446, 60, 0xF8F4E8, 0x303040);
-            Txt("Your team", 13, 3.5f, 6.5f, 0x303040);
-            Txt("Storage: " + box.Count, 70, 4, 5.5f, 0x606070);
-            Button(new RectangleF(250, 3, 62, 10), "Make lead", false, delegate { if (Idle) TeamLead(); }, 5.5f);
-            Button(new RectangleF(314, 3, 76, 10), "Swap w/ storage", false, delegate { if (Idle) TeamStorage(); }, 5.5f);
-            Button(new RectangleF(392, 3, 58, 10), "Close", false, delegate { if (Idle) mode = M_WORLD; }, 5.5f);
+            Panel(8, 2, 446, 60, 0xF7F8FB, 6);
+            Txt("Your team", 14, 4, 6.5f, 0x1E2230);
+            Txt("Storage: " + box.Count, 60, 5, 5, 0x7A8090);
+            Button(new RectangleF(254, 3.5f, 60, 9.5f), "Make lead", false, delegate { if (Idle) TeamLead(); }, 5.2f);
+            Button(new RectangleF(317, 3.5f, 74, 9.5f), "Swap w/ storage", false, delegate { if (Idle) TeamStorage(); }, 5.2f);
+            Button(new RectangleF(394, 3.5f, 54, 9.5f), "Close", false, delegate { if (Idle) mode = M_WORLD; }, 5.2f);
             for (int i = 0; i < 6; i++)
             {
-                RectangleF r = new RectangleF(12 + i * 73.5f, 15, 71, 44);
-                if (i >= party.Count) { PanelBox(r.X, r.Y, r.Width, r.Height, 0xECE8DC, 0xD0CCC0); continue; }
+                RectangleF r = new RectangleF(12 + i * 73.5f, 15, 70, 44);
+                if (i >= party.Count) { URect(r.X, r.Y, r.Width, r.Height, 0xECEEF3, 5); continue; }
                 Mon m = party[i];
                 bool on = cursor == i;
-                PanelBox(r.X, r.Y, r.Width, r.Height, on ? 0xFFF0B8 : 0xFFFFFF, on ? 0xE09020 : 0xB0B0C0);
-                Blit(MonSprite(m.Sp, false), r.X + 2, r.Y + 3, 24, 24);
-                if (i == 0) Txt("LEAD", r.X + 4, r.Y + 28, 4.5f, 0xE09020);
-                Txt(m.Name, r.X + 27, r.Y + 3, 5.5f, 0x202030);
-                Txt("Lv" + m.Level, r.X + 27, r.Y + 10, 5.5f, 0x505060);
-                R(r.X + 48, r.Y + 11, 20, 6, Data.TypeColors[m.Def.Type]);
-                Txt(Data.TypeNames[m.Def.Type], r.X + 58, r.Y + 11.4f, 3.8f, 0xFFFFFF, 1);
-                HpBar(r.X + 27, r.Y + 20, 40, m.Hp, m.MaxHp);
-                Txt(m.Hp + "/" + m.MaxHp, r.X + 27, r.Y + 24, 5, 0x505060);
-                R(r.X + 4, r.Y + 36, 63, 2, 0xD0D0E0);
-                R(r.X + 4, r.Y + 36, 63f * m.Xp / Math.Max(1, m.XpNeed), 2, 0x58A8F0);
+                URect(r.X, r.Y + 0.6f, r.Width, r.Height, on ? 0xE09020 : 0x101020, 5, on ? 70 : 25);
+                URect(r.X, r.Y, r.Width, r.Height, on ? 0xFFF3D0 : 0xFFFFFF, 5, 255, on ? 0xF0A830 : 0xE0E3EA);
+                UImg(MonSprite(m.Sp, false), r.X + 1, r.Y + 3, 26, 26);
+                if (i == 0) { URect(r.X + 3, r.Y + 30, 18, 5.5f, 0xF0A830, 2.7f); Txt("LEAD", r.X + 12, r.Y + 30.7f, 3.9f, 0xFFFFFF, 1); }
+                Txt(m.Name, r.X + 29, r.Y + 3.5f, 5.4f, 0x1E2230);
+                Txt("Lv" + m.Level, r.X + 28, r.Y + 10.5f, 5, 0x7A8090);
+                TypeTag(m.Def.Type, r.X + 44, r.Y + 11, 22);
+                HpBar(r.X + 28, r.Y + 20, 38, m.Hp, m.MaxHp);
+                Txt(m.Hp + "/" + m.MaxHp, r.X + 28, r.Y + 24.5f, 4.6f, 0x7A8090);
+                URect(r.X + 4, r.Y + 38, 62, 1.6f, 0xE0E3EA, 0.8f);
+                URect(r.X + 4, r.Y + 38, Math.Max(1.6f, 62f * m.Xp / Math.Max(1, m.XpNeed)), 1.6f, 0x4AA8F0, 0.8f);
                 int ii = i;
                 AddHit(r, delegate { if (Idle) cursor = ii; });
             }
@@ -1612,18 +1736,17 @@ namespace TaskbarTamer
 
         void DrawShop()
         {
-            Cover(130, 15, 220, 44);
-            PanelBox(130, 15, 220, 44, 0xF8F4E8, 0x303040);
-            Txt("Shop", 136, 17, 7, 0x303040);
-            Txt("You have " + coins + " coins", 344, 18, 6, 0x606070, 2);
+            Panel(130, 15, 220, 44, 0xF7F8FB, 6);
+            Txt("Shop", 137, 17.5f, 7, 0x1E2230);
+            Txt("You have " + coins + " coins", 343, 18.5f, 5.6f, 0x7A8090, 2);
             string[] labels = { "Orb  10c", "Potion  15c", "Leave" };
             for (int i = 0; i < 3; i++)
             {
                 int ii = i;
-                Button(new RectangleF(136 + i * 70, 30, 66, 13), labels[i], cursor == i, delegate { cursor = ii; ShopPick(ii); });
+                Button(new RectangleF(137 + i * 69.5f, 29, 66, 13), labels[i], cursor == i, delegate { cursor = ii; ShopPick(ii); });
             }
             string[] desc = { "Throw at a weak wild critter to catch it.", "Heals 30 HP during a battle.", "See you next time!" };
-            Txt(desc[cursor], 240, 47, 5.5f, 0x505060, 1);
+            Txt(desc[cursor], 240, 47, 5.4f, 0x6A7080, 1);
         }
 
         // ---------- battle ----------
@@ -1631,9 +1754,9 @@ namespace TaskbarTamer
         {
             DrawBackground(battleKind, Cam(), true);
 
-            int plat = battleKind == 2 ? 0xD8C888 : battleKind == 3 ? 0x2E7A34 : battleKind == 4 ? 0x48382F : 0x60B048;
-            lg.FillEllipse(Br(plat), 26, 51, 62, 10);
-            lg.FillEllipse(Br(plat), 390, 51, 62, 10);
+            // platforms
+            UEll(18, 52, 66, 10, 0x000000, 45);
+            UEll(395, 52, 66, 10, 0x000000, 45);
 
             // foe
             if (foeIdx < foes.Count)
@@ -1643,25 +1766,24 @@ namespace TaskbarTamer
                 {
                     float off = fLunge > 0 ? -(float)Math.Sin(fLunge / 0.35f * Math.PI) * 10 : 0;
                     off += fSlide * 80;
-                    DrawMon(f, 421 + off, 56, true, fFlash, fFaint);
+                    DrawMon(f, 428 + off, 58, true, fFlash, fFaint);
                 }
                 if (orbT > 0 || caught)
                 {
                     float wob = caught ? 0 : (float)Math.Sin(orbT * 9) * (orbT < 0.35f ? 0 : 2);
-                    float oy = orbT < 0.35f ? 30 + (orbT / 0.35f) * 20 : 50;
-                    DrawOrb(421 + wob, oy);
-                    if (caught && ((int)(t * 6)) % 2 == 0) { R(412, 40, 1, 1, 0xFFFFA0); R(430, 42, 1, 1, 0xFFFFA0); R(421, 36, 1, 1, 0xFFFFA0); }
+                    float oy = orbT < 0.35f ? 30 + (orbT / 0.35f) * 22 : 52;
+                    DrawOrb(428 + wob, oy);
+                    if (caught && ((int)(t * 6)) % 2 == 0) { UEll(418, 40, 2, 2, 0xFFF080); UEll(437, 42, 2, 2, 0xFFF080); UEll(428, 36, 2, 2, 0xFFF080); }
                 }
-                PanelBox(290, 3, 108, 22, 0xF8F4E8, 0x303040);
-                Txt(f.Name, 294, 4.5f, 6.5f, 0x202030);
-                Txt("Lv" + f.Level, 394, 5, 5.5f, 0x505060, 2);
-                R(294, 14, 20, 6, Data.TypeColors[f.Def.Type]);
-                Txt(Data.TypeNames[f.Def.Type], 304, 14.4f, 3.8f, 0xFFFFFF, 1);
-                Txt("HP", 318, 14, 5, 0xE09020);
-                HpBar(330, 16, 63, f.DispHp, f.MaxHp);
+                Panel(282, 3, 110, 22, 0xFFFFFF, 4);
+                Txt(f.Name, 287, 4.6f, 6.4f, 0x1E2230);
+                Txt("Lv" + f.Level, 387, 5.4f, 5.2f, 0x7A8090, 2);
+                TypeTag(f.Def.Type, 287, 14, 24);
+                Txt("HP", 314, 13.6f, 4.8f, 0xF0A030);
+                HpBar(323, 15.2f, 64, f.DispHp, f.MaxHp);
                 if (curTr != null)
                     for (int i = 0; i < foes.Count; i++)
-                        R(356 + i * 5, 21, 3, 2, foes[i].Hp > 0 ? 0xE03838 : 0x909098);
+                        UEll(350 + i * 5, 20.2f, 3, 3, foes[i].Hp > 0 ? 0xFF5A4E : 0xC0C4CE);
             }
 
             // player critter
@@ -1669,64 +1791,57 @@ namespace TaskbarTamer
             {
                 float off = pLunge > 0 ? (float)Math.Sin(pLunge / 0.35f * Math.PI) * 10 : 0;
                 float intro = Math.Max(0, 1 - introT * 2.5f) * 80;
-                DrawMon(p, 57 + off - intro, 56, false, pFlash, pFaint);
-                if (evoFlash > 0) R(30, 10, 54, 48, 0xFFFFFF, (int)(evoFlash * 200));
+                DrawMon(p, 51 + off - intro, 58, false, pFlash, pFaint);
+                if (evoFlash > 0) UEll(14, 4, 74, 56, 0xFFFFFF, (int)(evoFlash * 230));
             }
-            PanelBox(84, 3, 112, 24, 0xF8F4E8, 0x303040);
-            Txt(p.Name, 88, 4.5f, 6.5f, 0x202030);
-            Txt("Lv" + p.Level, 192, 5, 5.5f, 0x505060, 2);
-            Txt("HP", 88, 13.5f, 5, 0xE09020);
-            HpBar(100, 15.5f, 60, p.DispHp, p.MaxHp);
-            Txt((int)Math.Ceiling(p.DispHp) + "/" + p.MaxHp, 192, 13, 5, 0x404050, 2);
-            R(88, 23, 104, 1.5f, 0xD0D0E0);
-            R(88, 23, 104f * p.Xp / Math.Max(1, p.XpNeed), 1.5f, 0x58A8F0);
+            Panel(86, 3, 112, 24, 0xFFFFFF, 4);
+            Txt(p.Name, 91, 4.6f, 6.4f, 0x1E2230);
+            Txt("Lv" + p.Level, 193, 5.4f, 5.2f, 0x7A8090, 2);
+            Txt("HP", 91, 13.6f, 4.8f, 0xF0A030);
+            HpBar(100, 15.2f, 62, p.DispHp, p.MaxHp);
+            Txt((int)Math.Ceiling(p.DispHp) + "/" + p.MaxHp, 193, 13.4f, 4.8f, 0x5A6070, 2);
+            URect(91, 22.4f, 102, 1.6f, 0xE0E3EA, 0.8f);
+            URect(91, 22.4f, Math.Max(1.6f, 102f * p.Xp / Math.Max(1, p.XpNeed)), 1.6f, 0x4AA8F0, 0.8f);
 
             // message / menu area
-            float bx = 100, by = 29, bw = 280, bh = 33;
+            float bx = 100, by = 29, bw = 278, bh = 33;
             if (curMsg != null) DrawMsgBox(bx, by, bw, bh);
             else if (Idle) DrawBattleMenu(bx, by, bw, bh);
-            else PanelBox(bx, by, bw, bh, 0xFFFFFF, 0x303040);
+            else Panel(bx, by, bw, bh, 0xFFFFFF, 4, 250);
 
-            // intro wipe
-            if (introT < 0.4f)
-            {
-                float k = 1 - introT / 0.4f;
-                R(0, 0, VW, VH, 0x000000, (int)(k * 255));
-            }
+            // intro fade
+            if (introT < 0.4f) URect(0, 0, VW, VH, 0x000000, 0, (int)((1 - introT / 0.4f) * 255));
         }
 
         void DrawOrb(float cx, float cy)
         {
-            lg.FillEllipse(Br(0x181820), cx - 4, cy - 4, 8, 8);
-            lg.FillEllipse(Br(0xE03838), cx - 3, cy - 3, 6, 6);
-            R(cx - 3, cy, 6, 3, 0xF8F8F8);
-            R(cx - 3, cy - 0.5f, 6, 1, 0x181820);
-            R(cx - 1, cy - 1, 2, 2, 0xFFFFFF);
+            UEll(cx - 4, cy - 4, 8, 8, 0xFF4D4D, 255, 0x1A1A24);
+            UPoly(0xFFFFFF, cx - 3.6f, cy + 0.4f, cx + 3.6f, cy + 0.4f, cx + 2.6f, cy + 2.8f, cx, cy + 3.6f, cx - 2.6f, cy + 2.8f);
+            URect(cx - 3.8f, cy - 0.4f, 7.6f, 0.9f, 0x1A1A24);
+            UEll(cx - 1.3f, cy - 1.3f, 2.6f, 2.6f, 0xFFFFFF, 255, 0x1A1A24);
         }
 
         void DrawMon(Mon m, float cx, float baseY, bool flip, float flash, float faint)
         {
             if (flash > 0 && ((int)(flash * 16)) % 2 == 0) return;
-            float size = m.Def.Big ? 40 : 32;
-            float bob = (float)Math.Round(Math.Sin(t * 3 + (flip ? 1 : 0)) * 0.8);
-            float y = baseY - size + 1 + bob + faint * size;
             if (faint >= 1) return;
-            lg.SetClip(new RectangleF(cx - size, 0, size * 2, baseY + 2));
-            Blit(MonSprite(m.Sp, flip), cx - size / 2, y, size, size);
-            lg.ResetClip();
+            float size = m.Def.Big ? 54 : 46;
+            float bob = (float)Math.Round(Math.Sin(t * 3 + (flip ? 1 : 0)) * 0.8, 1);
+            float y = baseY - size + 1 + bob + faint * size;
+            UImg(MonSprite(m.Sp, flip), cx - size / 2, y, size, size, faint > 0 ? baseY : -1);
         }
 
         void DrawBattleMenu(float x, float y, float w, float h)
         {
-            PanelBox(x, y, w, h, 0xFFFFFF, 0x303040);
+            Panel(x, y, w, h, 0xFFFFFF, 4, 250);
             if (phase == PH_MENU)
             {
-                TxtWrap("What will " + P.Name + " do?", x + 5, y + 4, 100, 7, 0x202030);
+                TxtWrap("What will " + P.Name + " do?", x + 6, y + 4, 96, 6.8f, 0x1E2230);
                 string[] l = { "FIGHT", "BAG", "TEAM", "RUN" };
                 for (int i = 0; i < 4; i++)
                 {
                     int ii = i;
-                    RectangleF r = new RectangleF(x + 112 + (i % 2) * 83, y + 3 + (i / 2) * 14, 81, 13);
+                    RectangleF r = new RectangleF(x + 108 + (i % 2) * 84, y + 3.5f + (i / 2) * 13.5f, 81, 12);
                     Button(r, l[i], cursor == i, delegate { cursor = ii; BattlePick(ii); });
                 }
             }
@@ -1736,20 +1851,19 @@ namespace TaskbarTamer
                 {
                     int ii = i;
                     MoveDef mv = Data.Moves[P.Moves[i]];
-                    RectangleF r = new RectangleF(x + 3 + (i % 2) * 92, y + 3 + (i / 2) * 14, 90, 13);
-                    Button(r, mv.Name, cursor == i, delegate { cursor = ii; BattlePick(ii); }, 6.5f, Data.TypeColors[mv.Type]);
+                    RectangleF r = new RectangleF(x + 4 + (i % 2) * 92, y + 3.5f + (i / 2) * 13.5f, 89, 12);
+                    Button(r, mv.Name, cursor == i, delegate { cursor = ii; BattlePick(ii); }, 6.2f, Data.TypeColors[mv.Type]);
                 }
                 if (cursor < P.Moves.Count)
                 {
                     MoveDef mv = Data.Moves[P.Moves[cursor]];
-                    R(x + 192, y + 4, 40, 8, Data.TypeColors[mv.Type]);
-                    Txt(Data.TypeNames[mv.Type], x + 212, y + 4.6f, 5, 0xFFFFFF, 1);
-                    Txt("Power " + mv.Power, x + 192, y + 14, 5.5f, 0x404050);
-                    Txt("Accuracy " + mv.Acc, x + 192, y + 21, 5.5f, 0x404050);
+                    TypeTag(mv.Type, x + 192, y + 4.5f, 30);
+                    Txt("Power " + mv.Power, x + 192, y + 13.5f, 5.2f, 0x5A6070);
+                    Txt("Accuracy " + mv.Acc, x + 192, y + 20.5f, 5.2f, 0x5A6070);
                     double e = Data.Eff(mv.Type, F.Def.Type);
-                    if (e != 1) Txt(e > 1 ? "Super effective!" : "Not very effective", x + 236, y + 4.5f, 5, e > 1 ? 0x30A040 : 0xC05030);
+                    if (e != 1) Txt(e > 1 ? "Super effective!" : "Not very effective", x + 226, y + 5, 4.6f, e > 1 ? 0x2FA84F : 0xD05040);
                 }
-                Button(new RectangleF(x + w - 34, y + h - 13, 31, 10), "Back", false, delegate { BattleBack(); }, 5);
+                Button(new RectangleF(x + w - 34, y + h - 12.5f, 30, 9.5f), "Back", false, delegate { BattleBack(); }, 5);
             }
             else if (phase == PH_BAG)
             {
@@ -1757,10 +1871,10 @@ namespace TaskbarTamer
                 for (int i = 0; i < 3; i++)
                 {
                     int ii = i;
-                    Button(new RectangleF(x + 3 + i * 92, y + 3, 90, 13), l[i], cursor == i, delegate { cursor = ii; BattlePick(ii); });
+                    Button(new RectangleF(x + 4 + i * 91, y + 3.5f, 88, 12), l[i], cursor == i, delegate { cursor = ii; BattlePick(ii); });
                 }
                 string[] d = { curTr != null ? "Can't catch a trainer's critter." : "Catch the wild critter. Works best at low HP.", "Heal 30 HP. Uses your turn.", "" };
-                Txt(d[Math.Min(cursor, 2)], x + 6, y + 21, 5.5f, 0x505060);
+                Txt(d[Math.Min(cursor, 2)], x + 7, y + 21, 5.4f, 0x6A7080);
             }
             else if (phase == PH_TEAM)
             {
@@ -1768,12 +1882,12 @@ namespace TaskbarTamer
                 for (int i = 0; i < n; i++)
                 {
                     int ii = i;
-                    RectangleF r = new RectangleF(x + 3 + (i % 4) * 69, y + 3 + (i / 4) * 14, 67, 13);
-                    if (i >= party.Count) { Button(r, "Back", cursor == i, delegate { cursor = ii; BattlePick(ii); }, 5.5f); continue; }
+                    RectangleF r = new RectangleF(x + 4 + (i % 4) * 68.5f, y + 3.5f + (i / 4) * 13.5f, 66, 12);
+                    if (i >= party.Count) { Button(r, "Back", cursor == i, delegate { cursor = ii; BattlePick(ii); }, 5.4f); continue; }
                     Mon m = party[i];
-                    Button(r, m.Name, cursor == i, delegate { cursor = ii; BattlePick(ii); }, 5.2f, m.Hp > 0 ? (i == act ? 0xE09020 : 0x48D058) : 0x909098);
+                    Button(r, m.Name, cursor == i, delegate { cursor = ii; BattlePick(ii); }, 5.2f, m.Hp > 0 ? (i == act ? 0xF0A030 : 0x4CD964) : 0xB0B4C0);
                 }
-                if (forcedSwitch) Txt("Pick who goes next!", x + w - 6, y + h - 9, 5.5f, 0xC05030, 2);
+                if (forcedSwitch) Txt("Pick who goes next!", x + w - 6, y + h - 9, 5.4f, 0xD05040, 2);
             }
         }
 

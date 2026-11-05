@@ -1,6 +1,6 @@
 # Taskbar Tamer
 
-A small creature-catching adventure that lives in a strip floating just above your Windows taskbar.
+A small creature-catching adventure in a rounded strip that floats just above your Windows taskbar.
 It has no title bar and no taskbar button, and it doesn't show in Alt+Tab. You can shrink it into a small bubble whenever you want.
 
 ## Play (Windows 10/11)
